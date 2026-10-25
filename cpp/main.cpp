@@ -1,10 +1,12 @@
 // lmnet: classic Linux network tools plus structured, scriptable
 // introspection in one statically linked CLI.
 #include "net.hpp"
+#include "dns.hpp"
 #include "sockets.hpp"
 #include "dslvm.hpp"
 #include "schema_embedded.hpp"
 
+#include <cctype>
 #include <cstdio>
 #include <iostream>
 #include <memory>
@@ -23,6 +25,8 @@ struct Host {
   std::vector<std::unique_ptr<std::vector<lmnet::Iface *>>> iface_lists;
   std::vector<std::unique_ptr<lmnet::Socket>> sockets;
   std::vector<std::unique_ptr<std::vector<lmnet::Socket *>>> socket_lists;
+  std::vector<std::unique_ptr<lmnet::DnsResult>> dns_results;
+  std::vector<std::unique_ptr<std::vector<lmnet::DnsAnswer *>>> dns_answer_lists;
   template <class T>
   Value hold(std::vector<std::unique_ptr<T>> &arena, const char *type, T value) {
     if (arena.size() >= 65536)
@@ -38,6 +42,18 @@ lmnet::Iface *iface_of(void *p, const char *who) {
   auto *i = self<lmnet::Iface>(p);
   if (!i) throw dslvm::Error(std::string(who) + ": stale Iface handle");
   return i;
+}
+
+lmnet::DnsResult *dns_result_of(void *p, const char *who) {
+  auto *r = self<lmnet::DnsResult>(p);
+  if (!r) throw dslvm::Error(std::string(who) + ": stale DnsResult handle");
+  return r;
+}
+
+lmnet::DnsAnswer *dns_answer_of(void *p, const char *who) {
+  auto *a = self<lmnet::DnsAnswer>(p);
+  if (!a) throw dslvm::Error(std::string(who) + ": stale DnsAnswer handle");
+  return a;
 }
 
 std::string json_escape(const std::string &s) {
@@ -76,6 +92,13 @@ std::string socket_json(const lmnet::Socket &s) {
          ",\"state\":" + json_string(s.state) +
          ",\"pid\":" + std::to_string(s.pid) +
          ",\"process\":" + json_string(s.process) + "}";
+}
+
+std::string dns_answer_json(const lmnet::DnsAnswer &a) {
+  return std::string("{\"name\":") + json_string(a.name) +
+         ",\"type\":" + json_string(a.type) +
+         ",\"ttl\":" + std::to_string(a.ttl) +
+         ",\"data\":" + json_string(a.data) + "}";
 }
 
 // ---- DSL registry: the schema implementation ----
@@ -171,6 +194,62 @@ void register_host(dslvm::Registry &reg, Host &host) {
       throw dslvm::Error("SocketList.at index out of range");
     return Value::object("Socket", v->at(static_cast<size_t>(i)));
   });
+
+  reg.method("Net", "dns_query", {"string", "string", "string"}, "DnsResult",
+             [&host](void *, Args &args) {
+               if (!lmnet::dns_type_known(args[1].s))
+                 throw dslvm::Error("dns_query: unsupported query type: " + args[1].s);
+               auto result = lmnet::dns_query(args[0].s, args[1].s, args[2].s);
+               // Network/parse failures come back in error() (dig semantics:
+               // a failed query is data, like NXDOMAIN), never a crash.
+               // Hold the result first: the answer list points into it.
+               Value res = host.hold(host.dns_results, "DnsResult", std::move(result));
+               auto *held = self<lmnet::DnsResult>(res.obj);
+               std::vector<lmnet::DnsAnswer *> ptrs;
+               ptrs.reserve(held->answers.size());
+               for (auto &answer : held->answers)
+                 ptrs.push_back(&answer);
+               host.hold(host.dns_answer_lists, "DnsAnswerList", std::move(ptrs));
+               return res;
+             });
+
+  reg.method("DnsResult", "rcode", {}, "string", [](void *s, Args &) {
+    return Value::string(dns_result_of(s, "rcode")->rcode);
+  });
+  reg.method("DnsResult", "error", {}, "string", [](void *s, Args &) {
+    return Value::string(dns_result_of(s, "error")->error);
+  });
+  reg.method("DnsResult", "answers", {}, "DnsAnswerList", [&host](void *s, Args &) {
+    auto *result = dns_result_of(s, "answers");
+    std::vector<lmnet::DnsAnswer *> ptrs;
+    ptrs.reserve(result->answers.size());
+    for (auto &answer : result->answers)
+      ptrs.push_back(&answer);
+    return host.hold(host.dns_answer_lists, "DnsAnswerList", std::move(ptrs));
+  });
+
+  const auto dns_method = [&reg](const char *name, auto impl) {
+    reg.method("DnsAnswer", name, {}, "string", [name, impl](void *s, Args &) {
+      return Value::string(impl(dns_answer_of(s, name)));
+    });
+  };
+  dns_method("name", [](const lmnet::DnsAnswer *a) { return a->name; });
+  dns_method("type", [](const lmnet::DnsAnswer *a) { return a->type; });
+  dns_method("data", [](const lmnet::DnsAnswer *a) { return a->data; });
+  reg.method("DnsAnswer", "ttl", {}, "int", [](void *s, Args &) {
+    return Value::integer(dns_answer_of(s, "ttl")->ttl);
+  });
+  reg.method("DnsAnswerList", "len", {}, "int", [](void *s, Args &) {
+    return Value::integer(
+        static_cast<int64_t>(self<std::vector<lmnet::DnsAnswer *>>(s)->size()));
+  });
+  reg.method("DnsAnswerList", "at", {"int"}, "DnsAnswer", [](void *s, Args &args) {
+    const auto *v = self<std::vector<lmnet::DnsAnswer *>>(s);
+    const int64_t i = args[0].i;
+    if (i < 0 || static_cast<size_t>(i) >= v->size())
+      throw dslvm::Error("DnsAnswerList.at index out of range");
+    return Value::object("DnsAnswer", v->at(static_cast<size_t>(i)));
+  });
 }
 
 void print_schema_summary(const dslvm::Registry &reg) {
@@ -202,6 +281,7 @@ int main(int argc, char **argv) {
       "       lmnet ping HOST [iputils ping options]\n"
       "       lmnet tracepath HOST [iputils tracepath options]\n"
       "       lmnet dns HOST        # resolve addresses (nslookup-lite)\n"
+      "       lmnet dig NAME [TYPE] [@server]  # DNS query (dig-lite)\n"
       "       lmnet ifaddrs         # interfaces with addresses (ip addr-lite)\n"
       "       lmnet sockets [tcp|udp|unix] [--listen]  # socket tables (netstat/lsof -i-lite)\n"
       "       lmnet --dsl FILE [FILE ...]\n";
@@ -239,6 +319,51 @@ int main(int argc, char **argv) {
     }
     for (const auto &a : addrs) std::cout << a << "\n";
     return 0;
+  }
+  if (argc >= 3 && std::string(argv[1]) == "dig") {
+    if (argc > 6) {
+      std::cerr << usage;
+      return 2;
+    }
+    const std::string name = argv[2];
+    std::string type = "A";
+    bool type_set = false;
+    std::string server;
+    for (int i = 3; i < argc; ++i) {
+      std::string arg = argv[i];
+      if (!arg.empty() && arg[0] == '@') {
+        if (!server.empty()) {
+          std::cerr << usage;
+          return 2;
+        }
+        server = arg.substr(1);
+        continue;
+      }
+      if (lmnet::dns_type_known(arg) && !type_set) {
+        std::string up;
+        for (char c : arg) up.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+        type = up;
+        type_set = true;
+        continue;
+      }
+      if (!server.empty()) {
+        std::cerr << usage;
+        return 2;
+      }
+      server = arg;
+    }
+    auto result = lmnet::dns_query(name, type, server);
+    if (!result.error.empty()) {
+      std::cerr << "lmnet dig: " << name << ": " << result.error << "\n";
+      return 1;
+    }
+    std::cout << "{\"rcode\":" << json_string(result.rcode) << ",\"answers\":[";
+    for (size_t i = 0; i < result.answers.size(); ++i) {
+      if (i) std::cout << ",";
+      std::cout << dns_answer_json(result.answers[i]);
+    }
+    std::cout << "]}\n";
+    return std::cout ? 0 : 4;
   }
   if (argc == 2 && std::string(argv[1]) == "ifaddrs") {
     std::string error;

@@ -6,10 +6,12 @@ BUILD_DIR="${BUILD_DIR:-build}"
 HOST="$BUILD_DIR/lmnet"
 stat_size(){ stat -c %s "$1" 2>/dev/null || stat -f%z "$1"; }
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/lmnet-test-XXXXXX")"
-trap 'rm -rf "$WORK"' EXIT
 pass=0
+FAKE_DNS_PID=""
 ok(){ pass=$((pass+1)); echo "ok $pass - $1"; }
 fail(){ echo "FAIL: $*" >&2; exit 1; }
+cleanup(){ [ -z "$FAKE_DNS_PID" ] || kill "$FAKE_DNS_PID" 2>/dev/null || true; rm -rf "$WORK"; }
+trap cleanup EXIT
 
 LMSCRIPT="$(scripts/select-compiler.sh)"
 COMPILER_SOURCE="$LMSCRIPT"
@@ -71,6 +73,97 @@ set +e; "$HOST" dns localhost.invalid-lmnet-test. >/dev/null 2>"$WORK/dns.err"; 
 [ "$code" = 1 ] || fail "unresolvable host exits 1 (got $code)"
 grep -qi 'localhost.invalid-lmnet-test' "$WORK/dns.err" || fail "dns error names the host: $(cat "$WORK/dns.err")"
 ok "dns failure exits 1 naming the host"
+
+# --- dig subcommand (fake DNS server, offline) ---
+# Tiny canned-response server: parses nothing, echoes the query id into a
+# fixed response. example.com A -> NOERROR with one A answer; a query whose
+# name contains "nxdom" -> NXDOMAIN with no answers.
+cat > "$WORK/fakedns.py" <<'PY'
+import socket, struct, sys
+port = int(sys.argv[1]) if len(sys.argv) > 1 else 15353
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.bind(("127.0.0.1", port))
+qname = b"\x07example\x03com\x00"
+question = qname + struct.pack(">HH", 1, 1)
+def canned(rcode, answer):
+    hdr = struct.pack(">HHHHHH", 0, 0x8180 | rcode, 1, 1 if answer else 0, 0, 0)
+    if not answer:
+        return hdr + question
+    return (hdr + question + b"\xc0\x0c" +
+            struct.pack(">HHIH", 1, 1, 300, 4) + bytes([93, 184, 216, 34]))
+while True:
+    datagram, peer = s.recvfrom(512)
+    reply = canned(3, False) if b"nxdom" in datagram else canned(0, True)
+    s.sendto(datagram[:2] + reply[2:], peer)  # echo the query's id
+PY
+python3 "$WORK/fakedns.py" 15353 &
+FAKE_DNS_PID=$!
+dig_out=""
+for _ in $(seq 1 25); do
+  if dig_out="$("$HOST" dig example.com A @127.0.0.1:15353 2>/dev/null)"; then break; fi
+  sleep 0.2
+done
+[ -n "$dig_out" ] || fail "dig against fake server produced no output (server never came up?)"
+DIG_OUT="$dig_out" python3 - <<'PY'
+import json, os
+r = json.loads(os.environ["DIG_OUT"])
+assert r["rcode"] == "NOERROR", r
+a = r["answers"]
+assert len(a) == 1 and a[0]["name"] == "example.com.", r
+assert a[0]["type"] == "A" and a[0]["ttl"] == 300, r
+assert a[0]["data"] == "93.184.216.34", r
+print("dig:", r["rcode"], a[0]["data"])
+PY
+ok "dig: JSON rcode NOERROR with canned A answer 93.184.216.34"
+
+cat > "$WORK/dig.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+let r = net.dns_query("example.com", "A", "127.0.0.1:15353");
+println("rcode: " + r.rcode());
+let answers = r.answers();
+if (answers.len() > 0) {
+  println("data: " + answers.at(0).data());
+  println("ttl: " + str(answers.at(0).ttl()));
+}
+end _dsl_
+savedsl(p, "$WORK/dig.dslb");
+EOF
+"$LMSCRIPT" "$WORK/dig.lms" "$WORK/dig.dslb" >/dev/null || fail "dig bytecode compile"
+out="$("$HOST" --dsl "$WORK/dig.dslb")"
+grep -q '^rcode: NOERROR$' <<<"$out" || fail "dig bytecode rcode: $out"
+grep -q '^data: 93\.184\.216\.34$' <<<"$out" || fail "dig bytecode data: $out"
+grep -q '^ttl: 300$' <<<"$out" || fail "dig bytecode ttl: $out"
+ok "bytecode: net.dns_query through the DSL"
+
+set +e; out="$("$HOST" dig example.com A @127.0.0.1:9 2>&1)"; code=$?; set -e
+[ "$code" = 1 ] || fail "dig to discard port exits 1 (got $code): $out"
+grep -qi '127\.0\.0\.1\|unreachable\|refused\|timeout' <<<"$out" || \
+  fail "dig error names the server/failure: $out"
+ok "dig to a dead server exits 1 naming the failure"
+
+nx_out="$("$HOST" dig nxdom.example.com A @127.0.0.1:15353)"
+NX_OUT="$nx_out" python3 - <<'PY'
+import json, os
+r = json.loads(os.environ["NX_OUT"])
+assert r["rcode"] == "NXDOMAIN" and r["answers"] == [], r
+print("dig nxdom:", r["rcode"])
+PY
+ok "dig NXDOMAIN rcode surfaces in JSON"
+
+cat > "$WORK/dnsoob.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+net.dns_query("example.com", "A", "127.0.0.1:15353").answers().at(5);
+end _dsl_
+savedsl(p, "$WORK/dnsoob.dslb");
+EOF
+"$LMSCRIPT" "$WORK/dnsoob.lms" "$WORK/dnsoob.dslb" >/dev/null || fail "compile"
+set +e; out="$("$HOST" --dsl "$WORK/dnsoob.dslb" 2>&1)"; code=$?; set -e
+[ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "DnsAnswerList.at bounds (exit $code): $out"
+ok "DnsAnswerList.at out of range refused (exit 3)"
+
+set +e; "$HOST" dig example.com A @127.0.0.1:15353 extra extra2 >/dev/null 2>&1; code=$?; set -e
+[ "$code" = 2 ] || fail "dig with too many args exits 2 (got $code)"
+ok "dig argument overflow refused (exit 2)"
 
 # --- ifaddrs subcommand ---
 out="$("$HOST" ifaddrs)"
@@ -192,7 +285,7 @@ ok "multiple bytecode files run sequentially"
 
 # --- examples compile and run ---
 mkdir -p build
-for f in dns-lookup interfaces sockets; do
+for f in dns-lookup dns-query interfaces sockets; do
   [ -f "examples/$f.lms" ] || continue
   "$LMSCRIPT" "examples/$f.lms" "build/$f.dslb" >"$WORK/$f.compile.log" 2>&1 || fail "$f example compile"
   "$HOST" --dsl "build/$f.dslb" >"$WORK/$f.out" || fail "$f example run"

@@ -9,9 +9,10 @@ The long-term goal is to combine the common Linux network toolbox (`ping`,
 `ip`, `netstat`, `lsof`, `traceroute`, `mtr`, `tracepath`, `dig`,
 `nslookup`, `iftop`, `iperf3`) behind one CLI and one scripting surface.
 Today lmnet ships the first slice: the iputils `ping` and `tracepath`
-engines, plus `dns` (nslookup-lite) and `ifaddrs` (`ip addr`-lite) built on
-libc. Packet capture stays with the sibling project lmshark (Wireshark/
-tcpdump territory); URL fetching will be lmcurl.
+engines, plus `dns` (nslookup-lite), `dig` (dig-lite: real DNS messages over
+UDP), and `ifaddrs` (`ip addr`-lite) built on libc. Packet capture stays
+with the sibling project lmshark (Wireshark/tcpdump territory); URL fetching
+will be lmcurl.
 
 ## Build
 
@@ -33,13 +34,18 @@ lmnet --dsl-signatures
 lmnet ping HOST [iputils ping options]        # the real iputils ping engine
 lmnet tracepath HOST [iputils tracepath options]
 lmnet dns HOST                                # resolve addresses (nslookup-lite)
+lmnet dig NAME [TYPE] [@server]               # DNS query as JSON (dig-lite)
 lmnet ifaddrs                                 # interfaces + addresses as JSON (ip addr-lite)
 lmnet --dsl FILE [FILE ...]
 ```
 
 `ping` and `tracepath` are the upstream iputils binaries-in-a-binary: same
 flags, same output, same behavior (including the usual raw-socket permission
-requirements). `dns` and `ifaddrs` are structured and print one JSON array.
+requirements). `dns` and `ifaddrs` are structured and print one JSON array;
+`dig` sends a real RFC 1035 query (UDP, 3 s timeout, connected socket so a
+dead resolver fails fast) and prints one JSON object
+`{"rcode": ..., "answers": [{name, type, ttl, data}]}` — try
+`lmnet dig example.com A @1.1.1.1`.
 
 ## Scripting
 
@@ -79,7 +85,9 @@ Windows port upstream to wrap.
 - `ip` (`addr`/`link`/`route` via netlink, iproute2 sources)
 - `traceroute`/`mtr` (structured hop lists through the DSL)
 - `netstat`/`lsof` (socket tables from /proc)
-- `dig`/`nslookup` (full DNS messages, not just addresses)
+- `dig`/`nslookup` (full DNS messages, not just addresses) — delivered as
+  dig-lite: `lmnet dig` + `net.dns_query` (nslookup-style name resolution
+  remains the `dns` subcommand/`net.dns_lookup`)
 - `iperf3` throughput runs as DSL objects
 
 ## License and company

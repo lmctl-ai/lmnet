@@ -12,6 +12,16 @@
             "returns": "StrList"
           }
         ],
+        "dns_query": [
+          {
+            "params": [
+              "string",
+              "string",
+              "string"
+            ],
+            "returns": "DnsResult"
+          }
+        ],
         "interfaces": [
           {
             "params": [],
@@ -25,6 +35,74 @@
               "bool"
             ],
             "returns": "SocketList"
+          }
+        ]
+      }
+    },
+    "DnsResult": {
+      "methods": {
+        "rcode": [
+          {
+            "params": [],
+            "returns": "string"
+          }
+        ],
+        "error": [
+          {
+            "params": [],
+            "returns": "string"
+          }
+        ],
+        "answers": [
+          {
+            "params": [],
+            "returns": "DnsAnswerList"
+          }
+        ]
+      }
+    },
+    "DnsAnswer": {
+      "methods": {
+        "name": [
+          {
+            "params": [],
+            "returns": "string"
+          }
+        ],
+        "type": [
+          {
+            "params": [],
+            "returns": "string"
+          }
+        ],
+        "ttl": [
+          {
+            "params": [],
+            "returns": "int"
+          }
+        ],
+        "data": [
+          {
+            "params": [],
+            "returns": "string"
+          }
+        ]
+      }
+    },
+    "DnsAnswerList": {
+      "methods": {
+        "len": [
+          {
+            "params": [],
+            "returns": "int"
+          }
+        ],
+        "at": [
+          {
+            "params": [
+              "int"
+            ],
+            "returns": "DnsAnswer"
           }
         ]
       }
