@@ -42,6 +42,7 @@ lmnet dns HOST                                # resolve addresses (nslookup-lite
 lmnet dig NAME [TYPE] [@server]               # DNS query as JSON (dig-lite)
 lmnet ifaddrs                                 # interfaces + addresses as JSON (ip addr-lite)
 lmnet route                                   # routing tables as JSON (ip route-lite)
+lmnet sockets [tcp|udp|unix] [--listen]       # socket tables as JSON (netstat/lsof -i-lite)
 lmnet trace HOST [maxttl]                     # UDP-probe traceroute as JSON (traceroute-lite)
 lmnet --dsl FILE [FILE ...]
 ```
@@ -105,7 +106,9 @@ Windows port upstream to wrap.
 - `traceroute`/`mtr` — traceroute-lite delivered over UDP/ICMP as
   `lmnet trace` / `net.trace` (IPv4, one probe per TTL); mtr-style repeated
   probes remain
-- `netstat`/`lsof` (socket tables from /proc)
+- `netstat`/`lsof` (socket tables from /proc) — delivered as `lmnet
+  sockets` / `net.sockets` (tcp/udp/unix tables, LISTEN view, process
+  attribution via /proc/<pid>/fd)
 - `dig`/`nslookup` (full DNS messages, not just addresses) — delivered as
   dig-lite: `lmnet dig` + `net.dns_query` (nslookup-style name resolution
   remains the `dns` subcommand/`net.dns_lookup`)
