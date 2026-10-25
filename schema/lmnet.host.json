@@ -5,7 +5,8 @@
     "Net": {
       "methods": {
         "dns_lookup": [{"params": ["string"], "returns": "StrList"}],
-        "interfaces": [{"params": [], "returns": "IfaceList"}]
+        "interfaces": [{"params": [], "returns": "IfaceList"}],
+        "sockets": [{"params": ["string", "bool"], "returns": "SocketList"}]
       }
     },
     "Iface": {
@@ -21,6 +22,22 @@
       "methods": {
         "len": [{"params": [], "returns": "int"}],
         "at": [{"params": ["int"], "returns": "Iface"}]
+      }
+    },
+    "Socket": {
+      "methods": {
+        "proto": [{"params": [], "returns": "string"}],
+        "local": [{"params": [], "returns": "string"}],
+        "remote": [{"params": [], "returns": "string"}],
+        "state": [{"params": [], "returns": "string"}],
+        "pid": [{"params": [], "returns": "int"}],
+        "process": [{"params": [], "returns": "string"}]
+      }
+    },
+    "SocketList": {
+      "methods": {
+        "len": [{"params": [], "returns": "int"}],
+        "at": [{"params": ["int"], "returns": "Socket"}]
       }
     }
   },

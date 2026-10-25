@@ -1,6 +1,7 @@
 // lmnet: classic Linux network tools plus structured, scriptable
 // introspection in one statically linked CLI.
 #include "net.hpp"
+#include "sockets.hpp"
 #include "dslvm.hpp"
 #include "schema_embedded.hpp"
 
@@ -20,6 +21,8 @@ using dslvm::Value;
 struct Host {
   std::vector<std::unique_ptr<lmnet::Iface>> ifaces;
   std::vector<std::unique_ptr<std::vector<lmnet::Iface *>>> iface_lists;
+  std::vector<std::unique_ptr<lmnet::Socket>> sockets;
+  std::vector<std::unique_ptr<std::vector<lmnet::Socket *>>> socket_lists;
   template <class T>
   Value hold(std::vector<std::unique_ptr<T>> &arena, const char *type, T value) {
     if (arena.size() >= 65536)
@@ -64,6 +67,15 @@ std::string iface_json(const lmnet::Iface &i) {
          ",\"mtu\":" + std::to_string(i.mtu) +
          ",\"up\":" + (i.up ? "true" : "false") +
          ",\"loopback\":" + (i.loopback ? "true" : "false") + "}";
+}
+
+std::string socket_json(const lmnet::Socket &s) {
+  return std::string("{\"proto\":") + json_string(s.proto) +
+         ",\"local\":" + json_string(s.local) +
+         ",\"remote\":" + json_string(s.remote) +
+         ",\"state\":" + json_string(s.state) +
+         ",\"pid\":" + std::to_string(s.pid) +
+         ",\"process\":" + json_string(s.process) + "}";
 }
 
 // ---- DSL registry: the schema implementation ----
@@ -122,6 +134,43 @@ void register_host(dslvm::Registry &reg, Host &host) {
       throw dslvm::Error("IfaceList.at index out of range");
     return Value::object("Iface", v->at(static_cast<size_t>(i)));
   });
+
+  reg.method("Net", "sockets", {"string", "bool"}, "SocketList", [&host](void *, Args &args) {
+    std::string error;
+    auto socks = lmnet::socket_table(args[0].s, args[1].b, error);
+    if (!error.empty())
+      throw dslvm::Error("sockets: " + error);
+    std::vector<lmnet::Socket *> ptrs;
+    for (auto &sock : socks) {
+      host.sockets.push_back(std::make_unique<lmnet::Socket>(std::move(sock)));
+      ptrs.push_back(host.sockets.back().get());
+    }
+    return host.hold(host.socket_lists, "SocketList", std::move(ptrs));
+  });
+
+  const auto socket_method = [&reg](const char *name, auto impl) {
+    reg.method("Socket", name, {}, "string", [name, impl](void *s, Args &) {
+      return Value::string(impl(self<lmnet::Socket>(s)));
+    });
+  };
+  socket_method("proto", [](const lmnet::Socket *s) { return s->proto; });
+  socket_method("local", [](const lmnet::Socket *s) { return s->local; });
+  socket_method("remote", [](const lmnet::Socket *s) { return s->remote; });
+  socket_method("state", [](const lmnet::Socket *s) { return s->state; });
+  socket_method("process", [](const lmnet::Socket *s) { return s->process; });
+  reg.method("Socket", "pid", {}, "int", [](void *s, Args &) {
+    return Value::integer(self<lmnet::Socket>(s)->pid);
+  });
+  reg.method("SocketList", "len", {}, "int", [](void *s, Args &) {
+    return Value::integer(static_cast<int64_t>(self<std::vector<lmnet::Socket *>>(s)->size()));
+  });
+  reg.method("SocketList", "at", {"int"}, "Socket", [](void *s, Args &args) {
+    const auto *v = self<std::vector<lmnet::Socket *>>(s);
+    const int64_t i = args[0].i;
+    if (i < 0 || static_cast<size_t>(i) >= v->size())
+      throw dslvm::Error("SocketList.at index out of range");
+    return Value::object("Socket", v->at(static_cast<size_t>(i)));
+  });
 }
 
 void print_schema_summary(const dslvm::Registry &reg) {
@@ -154,6 +203,7 @@ int main(int argc, char **argv) {
       "       lmnet tracepath HOST [iputils tracepath options]\n"
       "       lmnet dns HOST        # resolve addresses (nslookup-lite)\n"
       "       lmnet ifaddrs         # interfaces with addresses (ip addr-lite)\n"
+      "       lmnet sockets [tcp|udp|unix] [--listen]  # socket tables (netstat/lsof -i-lite)\n"
       "       lmnet --dsl FILE [FILE ...]\n";
   if (argc == 2 && std::string(argv[1]) == "--version") {
     std::cout << "lmnet " LMNET_VERSION "\n";
@@ -201,6 +251,34 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < ifaces.size(); ++i) {
       if (i) std::cout << ",";
       std::cout << iface_json(ifaces[i]);
+    }
+    std::cout << "]\n";
+    return std::cout ? 0 : 4;
+  }
+  if (argc >= 2 && std::string(argv[1]) == "sockets") {
+    std::string proto_filter;
+    bool only_listen = false;
+    for (int i = 2; i < argc; ++i) {
+      const std::string arg = argv[i];
+      if (arg == "--listen")
+        only_listen = true;
+      else if (arg == "tcp" || arg == "udp" || arg == "unix")
+        proto_filter = arg;
+      else {
+        std::cerr << usage;
+        return 2;
+      }
+    }
+    std::string error;
+    auto socks = lmnet::socket_table(proto_filter, only_listen, error);
+    if (!error.empty()) {
+      std::cerr << "lmnet sockets: " << error << "\n";
+      return 1;
+    }
+    std::cout << "[";
+    for (size_t i = 0; i < socks.size(); ++i) {
+      if (i) std::cout << ",";
+      std::cout << socket_json(socks[i]);
     }
     std::cout << "]\n";
     return std::cout ? 0 : 4;

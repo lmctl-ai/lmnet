@@ -17,6 +17,15 @@
             "params": [],
             "returns": "IfaceList"
           }
+        ],
+        "sockets": [
+          {
+            "params": [
+              "string",
+              "bool"
+            ],
+            "returns": "SocketList"
+          }
         ]
       }
     },
@@ -68,6 +77,64 @@
               "int"
             ],
             "returns": "Iface"
+          }
+        ]
+      }
+    },
+    "Socket": {
+      "methods": {
+        "proto": [
+          {
+            "params": [],
+            "returns": "string"
+          }
+        ],
+        "local": [
+          {
+            "params": [],
+            "returns": "string"
+          }
+        ],
+        "remote": [
+          {
+            "params": [],
+            "returns": "string"
+          }
+        ],
+        "state": [
+          {
+            "params": [],
+            "returns": "string"
+          }
+        ],
+        "pid": [
+          {
+            "params": [],
+            "returns": "int"
+          }
+        ],
+        "process": [
+          {
+            "params": [],
+            "returns": "string"
+          }
+        ]
+      }
+    },
+    "SocketList": {
+      "methods": {
+        "len": [
+          {
+            "params": [],
+            "returns": "int"
+          }
+        ],
+        "at": [
+          {
+            "params": [
+              "int"
+            ],
+            "returns": "Socket"
           }
         ]
       }

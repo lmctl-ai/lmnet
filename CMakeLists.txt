@@ -54,6 +54,7 @@ add_custom_target(lmnet_schema DEPENDS "${GENERATED_SCHEMA}")
 add_executable(lmnet
   cpp/main.cpp
   cpp/net.cpp
+  cpp/sockets.cpp
   ${IPUTILS_SOURCES}
   "${GENERATED_SCHEMA}"
 )

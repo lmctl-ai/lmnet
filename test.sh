@@ -99,6 +99,50 @@ fi
 grep -qi 'usage\|tracepath' "$WORK/tp.txt" || fail "tracepath -h shows usage: $(head -2 "$WORK/tp.txt")"
 ok "tracepath engine runs (usage output)"
 
+# --- socket tables (netstat/lsof -i-lite) ---
+out="$("$HOST" sockets --listen)"
+echo "$out" | python3 -c "
+import json,sys
+socks=json.load(sys.stdin)
+assert any(s['state']=='LISTEN' for s in socks), socks
+assert all(':' in s['local'] or s['proto']=='unix' for s in socks), socks
+print('sockets --listen:', len(socks), 'rows, at least one LISTEN')
+"
+ok "sockets --listen: LISTEN rows with endpoints"
+
+out="$("$HOST" sockets unix)"
+echo "$out" | python3 -c "
+import json,sys
+socks=json.load(sys.stdin)
+assert all(s['proto']=='unix' for s in socks), socks
+print('sockets unix:', len(socks), 'rows')
+"
+ok "sockets unix: proto filter honored"
+
+set +e; "$HOST" sockets bogus > /dev/null 2>&1; code=$?; set -e
+[ "$code" = 2 ] || fail "sockets with a bogus filter exits 2 (got $code)"
+ok "sockets with unknown filter refused (exit 2)"
+
+cat >> "$WORK/smoke.lms" <<'EOF2'
+EOF2
+cat > "$WORK/socks.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+let socks = net.sockets("tcp", true);
+let listeners = 0;
+for (i in range(0, socks.len())) {
+  let s = socks.at(i);
+  if (s.state() == "LISTEN") { listeners = listeners + 1; }
+}
+println("tcp listeners: " + str(listeners));
+if (listeners < 1) { println("no listeners found"); }
+end _dsl_
+savedsl(p, "$WORK/socks.dslb");
+EOF
+"$LMSCRIPT" "$WORK/socks.lms" "$WORK/socks.dslb" >/dev/null || fail "socks compile"
+out="$("$HOST" --dsl "$WORK/socks.dslb")"
+grep -q '^tcp listeners: [1-9]' <<<"$out" || fail "sockets bytecode: $out"
+ok "bytecode: net.sockets through the DSL"
+
 # --- DSL bytecode ---
 cat > "$WORK/smoke.lms" <<EOF
 p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
@@ -148,7 +192,7 @@ ok "multiple bytecode files run sequentially"
 
 # --- examples compile and run ---
 mkdir -p build
-for f in dns-lookup interfaces; do
+for f in dns-lookup interfaces sockets; do
   [ -f "examples/$f.lms" ] || continue
   "$LMSCRIPT" "examples/$f.lms" "build/$f.dslb" >"$WORK/$f.compile.log" 2>&1 || fail "$f example compile"
   "$HOST" --dsl "build/$f.dslb" >"$WORK/$f.out" || fail "$f example run"

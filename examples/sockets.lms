@@ -1,0 +1,26 @@
+# Chapter: Basics - socket tables
+# Shows: net.sockets, Socket.proto/local/remote/state/pid/process, filtering
+# Run: lmscript examples/sockets.lms      (then: lmnet --dsl build/sockets.dslb)
+# Needs: nothing (offline); every Linux host has listening sockets.
+# exit: 0
+# expect:
+#|listening tcp sockets:
+#|at least one listener
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+
+println("listening tcp sockets:");
+let socks = net.sockets("tcp", true);
+for (i in range(0, socks.len())) {
+  let s = socks.at(i);
+  let who = "";
+  if (s.pid() > 0) { who = " (" + s.process() + " pid " + str(s.pid()) + ")"; }
+  println("  " + s.proto() + " " + s.local() + " " + s.state() + who);
+}
+if (socks.len() > 0) {
+  println("at least one listener");
+} else {
+  println("no listeners found");
+}
+
+end _dsl_
+savedsl(p, "build/sockets.dslb");
