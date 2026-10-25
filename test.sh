@@ -405,6 +405,56 @@ set +e; out="$("$HOST" --dsl "$WORK/linkoob.dslb" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "LinkList.at bounds (exit $code): $out"
 ok "LinkList.at out of range refused (exit 3)"
 
+# --- counters subcommand (/proc/net/{snmp,netstat,snmp6}, netstat -s/nstat-lite) ---
+# Offline-deterministic: /proc/net/snmp always exists on Linux; a missing
+# /proc/net/snmp6 (or netstat) degrades silently, so only shape and
+# invariants are checked. Tcp.MaxConn is -1 on real kernels (kernel
+# convention for "no global limit"), the one documented non-counter field.
+out="$("$HOST" counters)"
+COUNTERS_OUT="$out" python3 - <<'PY'
+import json, os, re
+counters = json.loads(os.environ["COUNTERS_OUT"])  # strict: must be valid JSON
+assert isinstance(counters, dict), type(counters)
+assert len(counters) >= 50, len(counters)
+for key in ("Ip.InReceives", "Tcp.ActiveOpens", "Udp.InDatagrams"):
+    assert key in counters, key
+name = re.compile(r'^[A-Za-z0-9_.]+$')
+for key, value in counters.items():
+    assert name.match(key), key
+    assert isinstance(value, int), (key, value)
+    assert value >= 0 or key == "Tcp.MaxConn", (key, value)
+print("counters:", len(counters), "keys, Ip/Tcp/Udp spot keys, names sane")
+PY
+ok "counters: JSON object, >=50 keys, Ip/Tcp/Udp spot keys, names sane"
+
+cat > "$WORK/counters.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+let cs = net.counters();
+println("counters: " + str(cs.len()));
+for (i in range(0, cs.len())) {
+  let c = cs.at(i);
+  if (c.name() == "Ip.InReceives") { println("ip receives: " + str(c.value())); }
+}
+end _dsl_
+savedsl(p, "$WORK/counters.dslb");
+EOF
+"$LMSCRIPT" "$WORK/counters.lms" "$WORK/counters.dslb" >/dev/null || fail "counters compile"
+out="$("$HOST" --dsl "$WORK/counters.dslb")"
+grep -q '^counters: [1-9][0-9]' <<<"$out" || fail "counters bytecode count: $out"
+grep -q '^ip receives: [0-9][0-9]*$' <<<"$out" || fail "counters bytecode ip receives: $out"
+ok "bytecode: net.counters through the DSL"
+
+cat > "$WORK/countersoob.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+net.counters().at(999999);
+end _dsl_
+savedsl(p, "$WORK/countersoob.dslb");
+EOF
+"$LMSCRIPT" "$WORK/countersoob.lms" "$WORK/countersoob.dslb" >/dev/null || fail "compile"
+set +e; out="$("$HOST" --dsl "$WORK/countersoob.dslb" 2>&1)"; code=$?; set -e
+[ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "CounterList.at bounds (exit $code): $out"
+ok "CounterList.at out of range refused (exit 3)"
+
 # --- trace subcommand (UDP probes + ICMP answers; needs CAP_NET_RAW, skip without) ---
 set +e; out="$("$HOST" trace 127.0.0.1 2>&1)"; code=$?; set -e
 TRACE_RAW=0
@@ -522,7 +572,7 @@ ok "multiple bytecode files run sequentially"
 
 # --- examples compile and run ---
 mkdir -p build
-for f in dns-lookup dns-query interfaces link neigh routes sockets trace; do
+for f in counters dns-lookup dns-query interfaces link neigh routes sockets trace; do
   [ -f "examples/$f.lms" ] || continue
   "$LMSCRIPT" "examples/$f.lms" "build/$f.dslb" >"$WORK/$f.compile.log" 2>&1 || fail "$f example compile"
   "$HOST" --dsl "build/$f.dslb" >"$WORK/$f.out" || fail "$f example run"

@@ -12,6 +12,8 @@ The `install="github:lmctl-ai/lmnet@latest"` line in each script pins the
 host CLI the same way lmscript resolves any other tool.
 
 - `dns-lookup.lms` — resolve `localhost` and print every address
+- `counters.lms` — dump the kernel's protocol counters (netstat -s/nstat
+  coverage; the count varies by kernel, so only the framing lines are pinned)
 - `interfaces.lms` — enumerate interfaces, addresses, MTUs and flags
 - `link.lms` — dump every link device with RX/TX counters (unlike
   `interfaces`, this covers link devices with no addresses too)

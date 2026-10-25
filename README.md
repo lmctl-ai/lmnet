@@ -13,7 +13,8 @@ engines, the real iperf3 engine, plus `dns` (nslookup-lite), `dig`
 (dig-lite: real DNS messages over
 UDP), `ifaddrs` (`ip addr`-lite) built on libc, `route` (`ip route`-lite
 over rtnetlink), `neigh` (`ip neigh`-lite over rtnetlink), `link`
-(`ip -s link`-lite over rtnetlink), and `trace` (traceroute-lite: UDP probes, ICMP answers,
+(`ip -s link`-lite over rtnetlink), `counters` (netstat -s/nstat-lite from
+/proc/net), and `trace` (traceroute-lite: UDP probes, ICMP answers,
 structured hop list). Packet capture stays
 with the sibling project lmshark (Wireshark/tcpdump territory); URL fetching
 will be lmcurl.
@@ -45,6 +46,7 @@ lmnet ifaddrs                                 # interfaces + addresses as JSON (
 lmnet route                                   # routing tables as JSON (ip route-lite)
 lmnet neigh                                   # neighbor table as JSON (ip neigh-lite)
 lmnet link                                    # link devices + RX/TX counters as JSON (ip -s link-lite)
+lmnet counters                                # kernel networking counters as JSON (netstat -s/nstat-lite)
 lmnet sockets [tcp|udp|unix] [--listen]       # socket tables as JSON (netstat/lsof -i-lite)
 lmnet trace HOST [maxttl]                     # UDP-probe traceroute as JSON (traceroute-lite)
 lmnet --dsl FILE [FILE ...]
@@ -55,7 +57,7 @@ flags, same output, same behavior (including the usual raw-socket permission
 requirements). `iperf3` is the upstream iperf 3.22 engine likewise embedded
 — client and server, same flags and output (built without OpenSSL auth and
 without SCTP, matching iperf's own defaults). `dns`, `ifaddrs`, `route`, `neigh`, and `link` are structured and print one JSON
-array; `dig` sends a real RFC 1035 query (UDP, 3 s timeout, connected socket
+array; `counters` prints one flat JSON object; `dig` sends a real RFC 1035 query (UDP, 3 s timeout, connected socket
 so a dead resolver fails fast) and prints one JSON object
 `{"rcode": ..., "answers": [{name, type, ttl, data}]}` — try
 `lmnet dig example.com A @1.1.1.1`. `route` dumps every kernel routing table
@@ -72,6 +74,18 @@ lists interfaces that carry addresses), `link` covers every link device,
 including ones with no addresses at all, and adds the kernel's 64-bit
 RX/TX counters from `rtnl_link_stats64` (`mac` is "" when the device has
 no link-layer address; counters are 0 when the kernel omits `IFLA_STATS64`).
+`counters` dumps the kernel's protocol counters from `/proc/net/snmp`,
+`/proc/net/netstat`, and `/proc/net/snmp6` (`netstat -s`/`nstat`-lite) as one
+flat, name-sorted JSON object `{"Ip.InReceives": 12345, ...}`: counters from
+the two-line-per-section files are dot-joined `Section.Field`, matching
+nstat's naming (`Ip.InReceives`, `TcpExt.TCPSynRetrans`), while snmp6 names
+are already unique and kept as-is (`Ip6InReceives`); on a name collision the
+first occurrence wins. A missing source (e.g. `/proc/net/snmp6` on kernels
+without IPv6) is skipped silently — only a totally unreadable `/proc` fails
+(with one documented exception, `Tcp.MaxConn` is -1, the kernel's "no global
+limit" convention). In the DSL the same data is a `CounterList` of
+`Counter{name, value}` pairs via `net.counters`, mirroring how route JSON and
+`RouteList` are two views of one dump.
 `trace` is a
 structured traceroute-lite: one UDP probe per TTL to a high unprivileged port
 (33434+ttl), ICMP answers on a raw socket, printed as
@@ -125,6 +139,9 @@ Windows port upstream to wrap.
 - `netstat`/`lsof` (socket tables from /proc) — delivered as `lmnet
   sockets` / `net.sockets` (tcp/udp/unix tables, LISTEN view, process
   attribution via /proc/<pid>/fd)
+- `netstat -s`/`nstat` (kernel protocol counters from /proc/net) —
+  delivered as `lmnet counters` / `net.counters` (snmp/netstat/snmp6
+  coverage, nstat-style `Section.Field` key names)
 - `dig`/`nslookup` (full DNS messages, not just addresses) — delivered as
   dig-lite: `lmnet dig` + `net.dns_query` (nslookup-style name resolution
   remains the `dns` subcommand/`net.dns_lookup`)

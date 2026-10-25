@@ -6,6 +6,7 @@
 #include "route.hpp"
 #include "neigh.hpp"
 #include "link.hpp"
+#include "counters.hpp"
 #include "trace.hpp"
 #include "dslvm.hpp"
 #include "schema_embedded.hpp"
@@ -37,6 +38,8 @@ struct Host {
   std::vector<std::unique_ptr<std::vector<lmnet::Neighbor *>>> neighbor_lists;
   std::vector<std::unique_ptr<lmnet::Link>> links;
   std::vector<std::unique_ptr<std::vector<lmnet::Link *>>> link_lists;
+  std::vector<std::unique_ptr<lmnet::Counter>> counters;
+  std::vector<std::unique_ptr<std::vector<lmnet::Counter *>>> counter_lists;
   std::vector<std::unique_ptr<lmnet::DnsResult>> dns_results;
   std::vector<std::unique_ptr<std::vector<lmnet::DnsAnswer *>>> dns_answer_lists;
   std::vector<std::unique_ptr<lmnet::TraceResult>> traces;
@@ -92,6 +95,12 @@ lmnet::Link *link_of(void *p, const char *who) {
   auto *l = self<lmnet::Link>(p);
   if (!l) throw dslvm::Error(std::string(who) + ": stale Link handle");
   return l;
+}
+
+lmnet::Counter *counter_of(void *p, const char *who) {
+  auto *c = self<lmnet::Counter>(p);
+  if (!c) throw dslvm::Error(std::string(who) + ": stale Counter handle");
+  return c;
 }
 
 std::string json_escape(const std::string &s) {
@@ -432,6 +441,40 @@ void register_host(dslvm::Registry &reg, Host &host) {
     return Value::object("Link", v->at(static_cast<size_t>(i)));
   });
 
+  reg.method("Net", "counters", {}, "CounterList", [&host](void *, Args &) {
+    std::string error;
+    auto counters = lmnet::counters(error);
+    if (!error.empty())
+      throw dslvm::Error("counters: " + error);
+    std::vector<lmnet::Counter *> ptrs;
+    for (auto &counter : counters) {
+      host.counters.push_back(std::make_unique<lmnet::Counter>(std::move(counter)));
+      ptrs.push_back(host.counters.back().get());
+    }
+    return host.hold(host.counter_lists, "CounterList", std::move(ptrs));
+  });
+
+  const auto counter_method = [&reg](const char *name, auto impl) {
+    reg.method("Counter", name, {}, "string", [name, impl](void *s, Args &) {
+      return Value::string(impl(counter_of(s, name)));
+    });
+  };
+  counter_method("name", [](const lmnet::Counter *c) { return c->name; });
+  reg.method("Counter", "value", {}, "int", [](void *s, Args &) {
+    return Value::integer(counter_of(s, "value")->value);
+  });
+  reg.method("CounterList", "len", {}, "int", [](void *s, Args &) {
+    return Value::integer(
+        static_cast<int64_t>(self<std::vector<lmnet::Counter *>>(s)->size()));
+  });
+  reg.method("CounterList", "at", {"int"}, "Counter", [](void *s, Args &args) {
+    const auto *v = self<std::vector<lmnet::Counter *>>(s);
+    const int64_t i = args[0].i;
+    if (i < 0 || static_cast<size_t>(i) >= v->size())
+      throw dslvm::Error("CounterList.at index out of range");
+    return Value::object("Counter", v->at(static_cast<size_t>(i)));
+  });
+
   reg.method("Net", "dns_query", {"string", "string", "string"}, "DnsResult",
              [&host](void *, Args &args) {
                if (!lmnet::dns_type_known(args[1].s))
@@ -576,6 +619,7 @@ int main(int argc, char **argv) {
       "       lmnet route           # routing tables as JSON (ip route-lite)\n"
       "       lmnet neigh           # neighbor table as JSON (ip neigh-lite)\n"
       "       lmnet link            # link devices + RX/TX counters as JSON (ip -s link-lite)\n"
+      "       lmnet counters        # kernel networking counters as JSON (netstat -s/nstat-lite)\n"
       "       lmnet sockets [tcp|udp|unix] [--listen]  # socket tables (netstat/lsof -i-lite)\n"
       "       lmnet trace HOST [maxttl]  # UDP-probe traceroute as JSON (traceroute-lite)\n"
       "       lmnet iperf3 [iperf3 options]   # the real iperf3 engine (client/server)\n"
@@ -748,6 +792,21 @@ int main(int argc, char **argv) {
       std::cout << link_json(devs[i]);
     }
     std::cout << "]\n";
+    return std::cout ? 0 : 4;
+  }
+  if (argc == 2 && std::string(argv[1]) == "counters") {
+    std::string error;
+    auto counters = lmnet::counters(error);
+    if (!error.empty()) {
+      std::cerr << "lmnet counters: " << error << "\n";
+      return 1;
+    }
+    std::cout << "{";
+    for (size_t i = 0; i < counters.size(); ++i) {
+      if (i) std::cout << ",";
+      std::cout << json_string(counters[i].name) << ":" << counters[i].value;
+    }
+    std::cout << "}\n";
     return std::cout ? 0 : 4;
   }
   if (argc >= 3 && std::string(argv[1]) == "trace") {

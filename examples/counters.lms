@@ -1,0 +1,25 @@
+# Chapter: Basics - kernel networking counters (netstat -s/nstat-lite)
+# Shows: net.counters, Counter.name/value, CounterList len/at
+# Run: lmscript examples/counters.lms   (then: lmnet --dsl build/counters.dslb)
+# Needs: nothing (offline); reads /proc/net/{snmp,netstat,snmp6}. A missing
+#        source degrades silently; only an unreadable /proc fails the run.
+#        The count line is NOT pinned (kernel-dependent).
+# exit: 0
+# expect:
+#|kernel counters
+#|counter dump complete
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+
+println("kernel counters");
+let cs = net.counters();
+println("counters: " + str(cs.len()));
+for (i in range(0, cs.len())) {
+  let c = cs.at(i);
+  if (c.name() == "Ip.InReceives") {
+    println("Ip.InReceives " + str(c.value()));
+  }
+}
+println("counter dump complete");
+
+end _dsl_
+savedsl(p, "build/counters.dslb");

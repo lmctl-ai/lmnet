@@ -4,6 +4,7 @@
   "types": {
     "Net": {
       "methods": {
+        "counters": [{"params": [], "returns": "CounterList"}],
         "dns_lookup": [{"params": ["string"], "returns": "StrList"}],
         "dns_query": [{"params": ["string", "string", "string"], "returns": "DnsResult"}],
         "interfaces": [{"params": [], "returns": "IfaceList"}],
@@ -12,6 +13,18 @@
         "routes": [{"params": [], "returns": "RouteList"}],
         "sockets": [{"params": ["string", "bool"], "returns": "SocketList"}],
         "trace": [{"params": ["string", "int"], "returns": "TraceResult"}]
+      }
+    },
+    "Counter": {
+      "methods": {
+        "name": [{"params": [], "returns": "string"}],
+        "value": [{"params": [], "returns": "int"}]
+      }
+    },
+    "CounterList": {
+      "methods": {
+        "len": [{"params": [], "returns": "int"}],
+        "at": [{"params": ["int"], "returns": "Counter"}]
       }
     },
     "DnsResult": {
