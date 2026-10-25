@@ -455,6 +455,56 @@ set +e; out="$("$HOST" --dsl "$WORK/countersoob.dslb" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "CounterList.at bounds (exit $code): $out"
 ok "CounterList.at out of range refused (exit 3)"
 
+# --- rule subcommand (rtnetlink dump, ip rule-lite) ---
+# Offline-deterministic: every Linux kernel ships the local+main rules, so
+# the pref-0 local lookup rule is asserted.
+out="$("$HOST" rule)"
+RULE_OUT="$out" python3 - <<'PY'
+import json, os, re
+rules = json.loads(os.environ["RULE_OUT"])  # strict: must be valid JSON
+assert len(rules) >= 1, rules
+assert any(r["pref"] == 0 and r["action"] == "lookup" and r["table"] == "local"
+           for r in rules), rules
+cidr = re.compile(r'^\S+/\d+$')
+fwmark = re.compile(r'^0x[0-9a-fA-F]+(/0x[0-9a-fA-F]+)?$')
+for r in rules:
+    assert r["action"] and r["table"], r
+    if r["from"]: assert cidr.match(r["from"]), r
+    if r["fwmark"]: assert fwmark.match(r["fwmark"]), r
+print("rule:", len(rules), "rules, pref-0 local lookup present")
+PY
+ok "rule: JSON dump, pref-0 local lookup, sane action/table/from/fwmark"
+
+cat > "$WORK/rules.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+let rules = net.rules();
+println("rules: " + str(rules.len()));
+for (i in range(0, rules.len())) {
+  let r = rules.at(i);
+  if (r.pref() == 0) {
+    if (r.table() == "local") { println("local rule found"); }
+  }
+}
+end _dsl_
+savedsl(p, "$WORK/rules.dslb");
+EOF
+"$LMSCRIPT" "$WORK/rules.lms" "$WORK/rules.dslb" >/dev/null || fail "rules compile"
+out="$("$HOST" --dsl "$WORK/rules.dslb")"
+grep -q '^rules: [1-9]' <<<"$out" || fail "rules bytecode count: $out"
+grep -q '^local rule found$' <<<"$out" || fail "rules bytecode local rule: $out"
+ok "bytecode: net.rules through the DSL"
+
+cat > "$WORK/ruleoob.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+net.rules().at(9999);
+end _dsl_
+savedsl(p, "$WORK/ruleoob.dslb");
+EOF
+"$LMSCRIPT" "$WORK/ruleoob.lms" "$WORK/ruleoob.dslb" >/dev/null || fail "compile"
+set +e; out="$("$HOST" --dsl "$WORK/ruleoob.dslb" 2>&1)"; code=$?; set -e
+[ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "RuleList.at bounds (exit $code): $out"
+ok "RuleList.at out of range refused (exit 3)"
+
 # --- trace subcommand (UDP probes + ICMP answers; needs CAP_NET_RAW, skip without) ---
 set +e; out="$("$HOST" trace 127.0.0.1 2>&1)"; code=$?; set -e
 TRACE_RAW=0
@@ -572,7 +622,7 @@ ok "multiple bytecode files run sequentially"
 
 # --- examples compile and run ---
 mkdir -p build
-for f in counters dns-lookup dns-query interfaces link neigh routes sockets trace; do
+for f in counters dns-lookup dns-query interfaces link neigh routes rule sockets trace; do
   [ -f "examples/$f.lms" ] || continue
   "$LMSCRIPT" "examples/$f.lms" "build/$f.dslb" >"$WORK/$f.compile.log" 2>&1 || fail "$f example compile"
   "$HOST" --dsl "build/$f.dslb" >"$WORK/$f.out" || fail "$f example run"

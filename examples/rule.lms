@@ -1,0 +1,30 @@
+# Chapter: Basics - policy routing rules (ip rule-lite)
+# Shows: net.rules, Rule pref/family/table/action/from/to/fwmark/iif/oif/goto_target,
+#        RuleList len/at
+# Run: lmscript examples/rule.lms      (then: lmnet --dsl build/rule.dslb)
+# Needs: nothing (offline); rtnetlink dumps the rule list directly.
+#        The pref-0 local rule always exists, so the "found" line is pinned.
+# exit: 0
+# expect:
+#|policy rules
+#|local rule found
+#|rule dump complete
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+
+println("policy rules");
+let rules = net.rules();
+println("rules: " + str(rules.len()));
+for (i in range(0, rules.len())) {
+  let r = rules.at(i);
+  if (r.pref() == 0) {
+    if (r.table() == "local") { println("local rule found"); }
+  }
+  println("  pref " + str(r.pref()) + " " + r.family() + " table " + r.table() +
+          " action " + r.action() + " from " + r.from() + " to " + r.to() +
+          " fwmark " + r.fwmark() + " iif " + r.iif() + " oif " + r.oif() +
+          " goto " + str(r.goto_target()));
+}
+println("rule dump complete");
+
+end _dsl_
+savedsl(p, "build/rule.dslb");

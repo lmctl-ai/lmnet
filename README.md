@@ -12,7 +12,8 @@ Today lmnet ships the first slices: the iputils `ping` and `tracepath`
 engines, the real iperf3 engine, plus `dns` (nslookup-lite), `dig`
 (dig-lite: real DNS messages over
 UDP), `ifaddrs` (`ip addr`-lite) built on libc, `route` (`ip route`-lite
-over rtnetlink), `neigh` (`ip neigh`-lite over rtnetlink), `link`
+over rtnetlink), `neigh` (`ip neigh`-lite over rtnetlink), `rule`
+(`ip rule`-lite over rtnetlink), `link`
 (`ip -s link`-lite over rtnetlink), `counters` (netstat -s/nstat-lite from
 /proc/net), and `trace` (traceroute-lite: UDP probes, ICMP answers,
 structured hop list). Packet capture stays
@@ -44,6 +45,7 @@ lmnet dns HOST                                # resolve addresses (nslookup-lite
 lmnet dig NAME [TYPE] [@server]               # DNS query as JSON (dig-lite)
 lmnet ifaddrs                                 # interfaces + addresses as JSON (ip addr-lite)
 lmnet route                                   # routing tables as JSON (ip route-lite)
+lmnet rule                                    # policy routing rules as JSON (ip rule-lite)
 lmnet neigh                                   # neighbor table as JSON (ip neigh-lite)
 lmnet link                                    # link devices + RX/TX counters as JSON (ip -s link-lite)
 lmnet counters                                # kernel networking counters as JSON (netstat -s/nstat-lite)
@@ -56,13 +58,22 @@ lmnet --dsl FILE [FILE ...]
 flags, same output, same behavior (including the usual raw-socket permission
 requirements). `iperf3` is the upstream iperf 3.22 engine likewise embedded
 — client and server, same flags and output (built without OpenSSL auth and
-without SCTP, matching iperf's own defaults). `dns`, `ifaddrs`, `route`, `neigh`, and `link` are structured and print one JSON
+without SCTP, matching iperf's own defaults). `dns`, `ifaddrs`, `route`, `rule`, `neigh`, and `link` are structured and print one JSON
 array; `counters` prints one flat JSON object; `dig` sends a real RFC 1035 query (UDP, 3 s timeout, connected socket
 so a dead resolver fails fast) and prints one JSON object
 `{"rcode": ..., "answers": [{name, type, ttl, data}]}` — try
 `lmnet dig example.com A @1.1.1.1`. `route` dumps every kernel routing table
 over rtnetlink (IPv4 + IPv6, `ip route show table all`-style) as
-`[{dest, via, dev, proto, scope, metric, table, prefsrc}]`. `neigh` dumps the
+`[{dest, via, dev, proto, scope, metric, table, prefsrc}]`. `rule` dumps
+the policy routing rule list over rtnetlink (`ip rule`-lite) as
+`[{pref, family, table, action, from, to, fwmark, iif, oif, goto_target}]`,
+where `family` is `ipv4`/`ipv6`/`any` (or the numeric value for multicast
+rule families), `table` is a name (`local`, `main`, `default`, `unspec`) or
+a number, `action` is the `frh_action` (`lookup`, `goto`, `blackhole`,
+`unreachable`, `prohibit`, ...), `from`/`to` are CIDR selectors ("" when the
+rule matches all sources/destinations), `fwmark` is `0xNN[/0xMM]` ("" when
+unset), `iif`/`oif` are interface names ("" when unset), and `goto_target`
+is the `FRA_GOTO` priority (-1 when absent). `neigh` dumps the
 ARP/NDP neighbor table over rtnetlink (`ip neigh`/`arp`-lite) as
 `[{ip, dev, state, mac, family, router, proxy}]`, where `state` is the
 lowercased kernel NUD state, `mac` is "" when the kernel has no link-layer
@@ -131,7 +142,8 @@ Windows port upstream to wrap.
 ## Roadmap
 
 - `ip` — `route` delivered over rtnetlink as `lmnet route` / `net.routes`,
-  `neigh` as `lmnet neigh` / `net.neighbors`, and `link` as `lmnet link` /
+  `neigh` as `lmnet neigh` / `net.neighbors`, `rule` as `lmnet rule` /
+  `net.rules`, and `link` as `lmnet link` /
   `net.links` (`addr` already covered by `ifaddrs`); iproute2 sources remain
 - `traceroute`/`mtr` — traceroute-lite delivered over UDP/ICMP as
   `lmnet trace` / `net.trace` (IPv4, one probe per TTL); mtr-style repeated

@@ -10,6 +10,7 @@
         "interfaces": [{"params": [], "returns": "IfaceList"}],
         "links": [{"params": [], "returns": "LinkList"}],
         "neighbors": [{"params": [], "returns": "NeighborList"}],
+        "rules": [{"params": [], "returns": "RuleList"}],
         "routes": [{"params": [], "returns": "RouteList"}],
         "sockets": [{"params": ["string", "bool"], "returns": "SocketList"}],
         "trace": [{"params": ["string", "int"], "returns": "TraceResult"}]
@@ -121,6 +122,26 @@
       "methods": {
         "len": [{"params": [], "returns": "int"}],
         "at": [{"params": ["int"], "returns": "Route"}]
+      }
+    },
+    "Rule": {
+      "methods": {
+        "pref": [{"params": [], "returns": "int"}],
+        "family": [{"params": [], "returns": "string"}],
+        "table": [{"params": [], "returns": "string"}],
+        "action": [{"params": [], "returns": "string"}],
+        "from": [{"params": [], "returns": "string"}],
+        "to": [{"params": [], "returns": "string"}],
+        "fwmark": [{"params": [], "returns": "string"}],
+        "iif": [{"params": [], "returns": "string"}],
+        "oif": [{"params": [], "returns": "string"}],
+        "goto_target": [{"params": [], "returns": "int"}]
+      }
+    },
+    "RuleList": {
+      "methods": {
+        "len": [{"params": [], "returns": "int"}],
+        "at": [{"params": ["int"], "returns": "Rule"}]
       }
     },
     "Socket": {

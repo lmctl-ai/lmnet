@@ -6,6 +6,7 @@
 #include "route.hpp"
 #include "neigh.hpp"
 #include "link.hpp"
+#include "rule.hpp"
 #include "counters.hpp"
 #include "trace.hpp"
 #include "dslvm.hpp"
@@ -38,6 +39,8 @@ struct Host {
   std::vector<std::unique_ptr<std::vector<lmnet::Neighbor *>>> neighbor_lists;
   std::vector<std::unique_ptr<lmnet::Link>> links;
   std::vector<std::unique_ptr<std::vector<lmnet::Link *>>> link_lists;
+  std::vector<std::unique_ptr<lmnet::Rule>> rules;
+  std::vector<std::unique_ptr<std::vector<lmnet::Rule *>>> rule_lists;
   std::vector<std::unique_ptr<lmnet::Counter>> counters;
   std::vector<std::unique_ptr<std::vector<lmnet::Counter *>>> counter_lists;
   std::vector<std::unique_ptr<lmnet::DnsResult>> dns_results;
@@ -101,6 +104,12 @@ lmnet::Counter *counter_of(void *p, const char *who) {
   auto *c = self<lmnet::Counter>(p);
   if (!c) throw dslvm::Error(std::string(who) + ": stale Counter handle");
   return c;
+}
+
+lmnet::Rule *rule_of(void *p, const char *who) {
+  auto *r = self<lmnet::Rule>(p);
+  if (!r) throw dslvm::Error(std::string(who) + ": stale Rule handle");
+  return r;
 }
 
 std::string json_escape(const std::string &s) {
@@ -185,6 +194,19 @@ std::string link_json(const lmnet::Link &l) {
          ",\"tx_packets\":" + std::to_string(l.tx_packets) +
          ",\"tx_errors\":" + std::to_string(l.tx_errors) +
          ",\"tx_dropped\":" + std::to_string(l.tx_dropped) + "}";
+}
+
+std::string rule_json(const lmnet::Rule &r) {
+  return std::string("{\"pref\":") + std::to_string(r.pref) +
+         ",\"family\":" + json_string(r.family) +
+         ",\"table\":" + json_string(r.table) +
+         ",\"action\":" + json_string(r.action) +
+         ",\"from\":" + json_string(r.from) +
+         ",\"to\":" + json_string(r.to) +
+         ",\"fwmark\":" + json_string(r.fwmark) +
+         ",\"iif\":" + json_string(r.iif) +
+         ",\"oif\":" + json_string(r.oif) +
+         ",\"goto_target\":" + std::to_string(r.goto_target) + "}";
 }
 
 std::string hop_json(const lmnet::Hop &h) {
@@ -475,6 +497,50 @@ void register_host(dslvm::Registry &reg, Host &host) {
     return Value::object("Counter", v->at(static_cast<size_t>(i)));
   });
 
+  reg.method("Net", "rules", {}, "RuleList", [&host](void *, Args &) {
+    std::string error;
+    auto rules = lmnet::rules(error);
+    if (!error.empty())
+      throw dslvm::Error("rules: " + error);
+    std::vector<lmnet::Rule *> ptrs;
+    for (auto &rule : rules) {
+      host.rules.push_back(std::make_unique<lmnet::Rule>(std::move(rule)));
+      ptrs.push_back(host.rules.back().get());
+    }
+    return host.hold(host.rule_lists, "RuleList", std::move(ptrs));
+  });
+
+  const auto rule_method = [&reg](const char *name, auto impl) {
+    reg.method("Rule", name, {}, "string", [name, impl](void *s, Args &) {
+      return Value::string(impl(rule_of(s, name)));
+    });
+  };
+  rule_method("family", [](const lmnet::Rule *r) { return r->family; });
+  rule_method("table", [](const lmnet::Rule *r) { return r->table; });
+  rule_method("action", [](const lmnet::Rule *r) { return r->action; });
+  rule_method("from", [](const lmnet::Rule *r) { return r->from; });
+  rule_method("to", [](const lmnet::Rule *r) { return r->to; });
+  rule_method("fwmark", [](const lmnet::Rule *r) { return r->fwmark; });
+  rule_method("iif", [](const lmnet::Rule *r) { return r->iif; });
+  rule_method("oif", [](const lmnet::Rule *r) { return r->oif; });
+  reg.method("Rule", "pref", {}, "int", [](void *s, Args &) {
+    return Value::integer(rule_of(s, "pref")->pref);
+  });
+  reg.method("Rule", "goto_target", {}, "int", [](void *s, Args &) {
+    return Value::integer(rule_of(s, "goto_target")->goto_target);
+  });
+  reg.method("RuleList", "len", {}, "int", [](void *s, Args &) {
+    return Value::integer(
+        static_cast<int64_t>(self<std::vector<lmnet::Rule *>>(s)->size()));
+  });
+  reg.method("RuleList", "at", {"int"}, "Rule", [](void *s, Args &args) {
+    const auto *v = self<std::vector<lmnet::Rule *>>(s);
+    const int64_t i = args[0].i;
+    if (i < 0 || static_cast<size_t>(i) >= v->size())
+      throw dslvm::Error("RuleList.at index out of range");
+    return Value::object("Rule", v->at(static_cast<size_t>(i)));
+  });
+
   reg.method("Net", "dns_query", {"string", "string", "string"}, "DnsResult",
              [&host](void *, Args &args) {
                if (!lmnet::dns_type_known(args[1].s))
@@ -617,6 +683,7 @@ int main(int argc, char **argv) {
       "       lmnet dig NAME [TYPE] [@server]  # DNS query (dig-lite)\n"
       "       lmnet ifaddrs         # interfaces with addresses (ip addr-lite)\n"
       "       lmnet route           # routing tables as JSON (ip route-lite)\n"
+      "       lmnet rule            # policy routing rules as JSON (ip rule-lite)\n"
       "       lmnet neigh           # neighbor table as JSON (ip neigh-lite)\n"
       "       lmnet link            # link devices + RX/TX counters as JSON (ip -s link-lite)\n"
       "       lmnet counters        # kernel networking counters as JSON (netstat -s/nstat-lite)\n"
@@ -760,6 +827,21 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < routes.size(); ++i) {
       if (i) std::cout << ",";
       std::cout << route_json(routes[i]);
+    }
+    std::cout << "]\n";
+    return std::cout ? 0 : 4;
+  }
+  if (argc == 2 && std::string(argv[1]) == "rule") {
+    std::string error;
+    auto rules = lmnet::rules(error);
+    if (!error.empty()) {
+      std::cerr << "lmnet rule: " << error << "\n";
+      return 1;
+    }
+    std::cout << "[";
+    for (size_t i = 0; i < rules.size(); ++i) {
+      if (i) std::cout << ",";
+      std::cout << rule_json(rules[i]);
     }
     std::cout << "]\n";
     return std::cout ? 0 : 4;
