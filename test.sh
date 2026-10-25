@@ -358,6 +358,53 @@ set +e; out="$("$HOST" --dsl "$WORK/neighoob.dslb" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "NeighborList.at bounds (exit $code): $out"
 ok "NeighborList.at out of range refused (exit 3)"
 
+# --- link subcommand (rtnetlink dump, ip -s link-lite) ---
+# Offline-deterministic: the loopback link always exists, so lo is asserted.
+out="$("$HOST" link)"
+LINK_OUT="$out" python3 - <<'PY'
+import json, os
+links = json.loads(os.environ["LINK_OUT"])  # strict: must be valid JSON
+assert len(links) >= 1, links
+lo = [l for l in links if l["name"] == "lo"]
+assert len(lo) == 1, links
+assert lo[0]["up"] is True and lo[0]["loopback"] is True, lo[0]
+for l in links:
+    assert l["name"] and isinstance(l["mtu"], int) and l["mtu"] >= 0, l
+    for k in ("rx_bytes", "rx_packets", "rx_errors", "rx_dropped",
+              "tx_bytes", "tx_packets", "tx_errors", "tx_dropped"):
+        assert isinstance(l[k], int) and l[k] >= 0, (k, l)
+print("link:", len(links), "devices, lo up/loopback, counters sane")
+PY
+ok "link: JSON dump, lo up/loopback, non-negative counters everywhere"
+
+cat > "$WORK/links.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+let links = net.links();
+println("links: " + str(links.len()));
+for (i in range(0, links.len())) {
+  let l = links.at(i);
+  if (l.name() == "lo") { println("lo: up " + str(l.up()) + " mtu=" + str(l.mtu())); }
+}
+end _dsl_
+savedsl(p, "$WORK/links.dslb");
+EOF
+"$LMSCRIPT" "$WORK/links.lms" "$WORK/links.dslb" >/dev/null || fail "links compile"
+out="$("$HOST" --dsl "$WORK/links.dslb")"
+grep -q '^links: [1-9]' <<<"$out" || fail "links bytecode count: $out"
+grep -q '^lo: up true mtu=' <<<"$out" || fail "links bytecode lo line: $out"
+ok "bytecode: net.links through the DSL"
+
+cat > "$WORK/linkoob.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+net.links().at(9999);
+end _dsl_
+savedsl(p, "$WORK/linkoob.dslb");
+EOF
+"$LMSCRIPT" "$WORK/linkoob.lms" "$WORK/linkoob.dslb" >/dev/null || fail "compile"
+set +e; out="$("$HOST" --dsl "$WORK/linkoob.dslb" 2>&1)"; code=$?; set -e
+[ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "LinkList.at bounds (exit $code): $out"
+ok "LinkList.at out of range refused (exit 3)"
+
 # --- trace subcommand (UDP probes + ICMP answers; needs CAP_NET_RAW, skip without) ---
 set +e; out="$("$HOST" trace 127.0.0.1 2>&1)"; code=$?; set -e
 TRACE_RAW=0
@@ -475,7 +522,7 @@ ok "multiple bytecode files run sequentially"
 
 # --- examples compile and run ---
 mkdir -p build
-for f in dns-lookup dns-query interfaces neigh routes sockets trace; do
+for f in dns-lookup dns-query interfaces link neigh routes sockets trace; do
   [ -f "examples/$f.lms" ] || continue
   "$LMSCRIPT" "examples/$f.lms" "build/$f.dslb" >"$WORK/$f.compile.log" 2>&1 || fail "$f example compile"
   "$HOST" --dsl "build/$f.dslb" >"$WORK/$f.out" || fail "$f example run"

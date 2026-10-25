@@ -1,0 +1,28 @@
+# Chapter: Basics - link devices with RX/TX counters (ip -s link-lite)
+# Shows: net.links, Link.name/index/mtu/up/loopback/mac/txqlen,
+#        Link rx_bytes/rx_packets/rx_errors/rx_dropped + tx_*,
+#        LinkList len/at
+# Run: lmscript examples/link.lms      (then: lmnet --dsl build/link.dslb)
+# Needs: nothing (offline); rtnetlink dumps every link device directly.
+#        The loopback link always exists, so the "found" line is pinned.
+# exit: 0
+# expect:
+#|loopback link found
+#|link dump complete
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+
+println("link devices");
+let links = net.links();
+println("links: " + str(links.len()));
+for (i in range(0, links.len())) {
+  let l = links.at(i);
+  if (l.loopback()) { println("loopback link found"); }
+  println("  " + l.name() + " index " + str(l.index()) + " mtu " + str(l.mtu()) +
+          " up " + str(l.up()) + " mac " + l.mac() + " txqlen " + str(l.txqlen()) +
+          " rx " + str(l.rx_bytes()) + "B/" + str(l.rx_packets()) + "p" +
+          " tx " + str(l.tx_bytes()) + "B/" + str(l.tx_packets()) + "p");
+}
+println("link dump complete");
+
+end _dsl_
+savedsl(p, "build/link.dslb");

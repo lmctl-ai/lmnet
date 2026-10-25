@@ -13,6 +13,8 @@ host CLI the same way lmscript resolves any other tool.
 
 - `dns-lookup.lms` — resolve `localhost` and print every address
 - `interfaces.lms` — enumerate interfaces, addresses, MTUs and flags
+- `link.lms` — dump every link device with RX/TX counters (unlike
+  `interfaces`, this covers link devices with no addresses too)
 - `neigh.lms` — dump the ARP/NDP neighbor table (prints an empty table
   cleanly on a fresh machine)
 - `trace.lms` — traceroute 127.0.0.1 and print the hop list (degrades to an

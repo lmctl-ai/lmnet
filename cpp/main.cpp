@@ -5,6 +5,7 @@
 #include "sockets.hpp"
 #include "route.hpp"
 #include "neigh.hpp"
+#include "link.hpp"
 #include "trace.hpp"
 #include "dslvm.hpp"
 #include "schema_embedded.hpp"
@@ -34,6 +35,8 @@ struct Host {
   std::vector<std::unique_ptr<std::vector<lmnet::Route *>>> route_lists;
   std::vector<std::unique_ptr<lmnet::Neighbor>> neighbors;
   std::vector<std::unique_ptr<std::vector<lmnet::Neighbor *>>> neighbor_lists;
+  std::vector<std::unique_ptr<lmnet::Link>> links;
+  std::vector<std::unique_ptr<std::vector<lmnet::Link *>>> link_lists;
   std::vector<std::unique_ptr<lmnet::DnsResult>> dns_results;
   std::vector<std::unique_ptr<std::vector<lmnet::DnsAnswer *>>> dns_answer_lists;
   std::vector<std::unique_ptr<lmnet::TraceResult>> traces;
@@ -83,6 +86,12 @@ lmnet::Neighbor *neighbor_of(void *p, const char *who) {
   auto *n = self<lmnet::Neighbor>(p);
   if (!n) throw dslvm::Error(std::string(who) + ": stale Neighbor handle");
   return n;
+}
+
+lmnet::Link *link_of(void *p, const char *who) {
+  auto *l = self<lmnet::Link>(p);
+  if (!l) throw dslvm::Error(std::string(who) + ": stale Link handle");
+  return l;
 }
 
 std::string json_escape(const std::string &s) {
@@ -149,6 +158,24 @@ std::string neighbor_json(const lmnet::Neighbor &n) {
          ",\"family\":" + json_string(n.family) +
          ",\"router\":" + (n.router ? "true" : "false") +
          ",\"proxy\":" + (n.proxy ? "true" : "false") + "}";
+}
+
+std::string link_json(const lmnet::Link &l) {
+  return std::string("{\"name\":") + json_string(l.name) +
+         ",\"index\":" + std::to_string(l.index) +
+         ",\"mtu\":" + std::to_string(l.mtu) +
+         ",\"up\":" + (l.up ? "true" : "false") +
+         ",\"loopback\":" + (l.loopback ? "true" : "false") +
+         ",\"mac\":" + json_string(l.mac) +
+         ",\"txqlen\":" + std::to_string(l.txqlen) +
+         ",\"rx_bytes\":" + std::to_string(l.rx_bytes) +
+         ",\"rx_packets\":" + std::to_string(l.rx_packets) +
+         ",\"rx_errors\":" + std::to_string(l.rx_errors) +
+         ",\"rx_dropped\":" + std::to_string(l.rx_dropped) +
+         ",\"tx_bytes\":" + std::to_string(l.tx_bytes) +
+         ",\"tx_packets\":" + std::to_string(l.tx_packets) +
+         ",\"tx_errors\":" + std::to_string(l.tx_errors) +
+         ",\"tx_dropped\":" + std::to_string(l.tx_dropped) + "}";
 }
 
 std::string hop_json(const lmnet::Hop &h) {
@@ -334,6 +361,77 @@ void register_host(dslvm::Registry &reg, Host &host) {
     return Value::object("Neighbor", v->at(static_cast<size_t>(i)));
   });
 
+  reg.method("Net", "links", {}, "LinkList", [&host](void *, Args &) {
+    std::string error;
+    auto devs = lmnet::links(error);
+    if (!error.empty())
+      throw dslvm::Error("links: " + error);
+    std::vector<lmnet::Link *> ptrs;
+    for (auto &dev : devs) {
+      host.links.push_back(std::make_unique<lmnet::Link>(std::move(dev)));
+      ptrs.push_back(host.links.back().get());
+    }
+    return host.hold(host.link_lists, "LinkList", std::move(ptrs));
+  });
+
+  const auto link_method = [&reg](const char *name, auto impl) {
+    reg.method("Link", name, {}, "string", [name, impl](void *s, Args &) {
+      return Value::string(impl(link_of(s, name)));
+    });
+  };
+  link_method("name", [](const lmnet::Link *l) { return l->name; });
+  link_method("mac", [](const lmnet::Link *l) { return l->mac; });
+  reg.method("Link", "index", {}, "int", [](void *s, Args &) {
+    return Value::integer(link_of(s, "index")->index);
+  });
+  reg.method("Link", "mtu", {}, "int", [](void *s, Args &) {
+    return Value::integer(link_of(s, "mtu")->mtu);
+  });
+  reg.method("Link", "up", {}, "bool", [](void *s, Args &) {
+    return Value::boolean(link_of(s, "up")->up);
+  });
+  reg.method("Link", "loopback", {}, "bool", [](void *s, Args &) {
+    return Value::boolean(link_of(s, "loopback")->loopback);
+  });
+  reg.method("Link", "txqlen", {}, "int", [](void *s, Args &) {
+    return Value::integer(link_of(s, "txqlen")->txqlen);
+  });
+  reg.method("Link", "rx_bytes", {}, "int", [](void *s, Args &) {
+    return Value::integer(link_of(s, "rx_bytes")->rx_bytes);
+  });
+  reg.method("Link", "rx_packets", {}, "int", [](void *s, Args &) {
+    return Value::integer(link_of(s, "rx_packets")->rx_packets);
+  });
+  reg.method("Link", "rx_errors", {}, "int", [](void *s, Args &) {
+    return Value::integer(link_of(s, "rx_errors")->rx_errors);
+  });
+  reg.method("Link", "rx_dropped", {}, "int", [](void *s, Args &) {
+    return Value::integer(link_of(s, "rx_dropped")->rx_dropped);
+  });
+  reg.method("Link", "tx_bytes", {}, "int", [](void *s, Args &) {
+    return Value::integer(link_of(s, "tx_bytes")->tx_bytes);
+  });
+  reg.method("Link", "tx_packets", {}, "int", [](void *s, Args &) {
+    return Value::integer(link_of(s, "tx_packets")->tx_packets);
+  });
+  reg.method("Link", "tx_errors", {}, "int", [](void *s, Args &) {
+    return Value::integer(link_of(s, "tx_errors")->tx_errors);
+  });
+  reg.method("Link", "tx_dropped", {}, "int", [](void *s, Args &) {
+    return Value::integer(link_of(s, "tx_dropped")->tx_dropped);
+  });
+  reg.method("LinkList", "len", {}, "int", [](void *s, Args &) {
+    return Value::integer(
+        static_cast<int64_t>(self<std::vector<lmnet::Link *>>(s)->size()));
+  });
+  reg.method("LinkList", "at", {"int"}, "Link", [](void *s, Args &args) {
+    const auto *v = self<std::vector<lmnet::Link *>>(s);
+    const int64_t i = args[0].i;
+    if (i < 0 || static_cast<size_t>(i) >= v->size())
+      throw dslvm::Error("LinkList.at index out of range");
+    return Value::object("Link", v->at(static_cast<size_t>(i)));
+  });
+
   reg.method("Net", "dns_query", {"string", "string", "string"}, "DnsResult",
              [&host](void *, Args &args) {
                if (!lmnet::dns_type_known(args[1].s))
@@ -477,6 +575,7 @@ int main(int argc, char **argv) {
       "       lmnet ifaddrs         # interfaces with addresses (ip addr-lite)\n"
       "       lmnet route           # routing tables as JSON (ip route-lite)\n"
       "       lmnet neigh           # neighbor table as JSON (ip neigh-lite)\n"
+      "       lmnet link            # link devices + RX/TX counters as JSON (ip -s link-lite)\n"
       "       lmnet sockets [tcp|udp|unix] [--listen]  # socket tables (netstat/lsof -i-lite)\n"
       "       lmnet trace HOST [maxttl]  # UDP-probe traceroute as JSON (traceroute-lite)\n"
       "       lmnet iperf3 [iperf3 options]   # the real iperf3 engine (client/server)\n"
@@ -632,6 +731,21 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < neighs.size(); ++i) {
       if (i) std::cout << ",";
       std::cout << neighbor_json(neighs[i]);
+    }
+    std::cout << "]\n";
+    return std::cout ? 0 : 4;
+  }
+  if (argc == 2 && std::string(argv[1]) == "link") {
+    std::string error;
+    auto devs = lmnet::links(error);
+    if (!error.empty()) {
+      std::cerr << "lmnet link: " << error << "\n";
+      return 1;
+    }
+    std::cout << "[";
+    for (size_t i = 0; i < devs.size(); ++i) {
+      if (i) std::cout << ",";
+      std::cout << link_json(devs[i]);
     }
     std::cout << "]\n";
     return std::cout ? 0 : 4;
