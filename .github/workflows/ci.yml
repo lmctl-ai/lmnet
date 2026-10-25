@@ -68,7 +68,7 @@ jobs:
         if: env.ONLY_OK == 'true'
         shell: bash
         run: |
-          npm i -g @lmctl-ai/lmctl@0.2.369
+          npm i -g @lmctl-ai/lmctl@0.2.420
           scripts/select-compiler.sh | tee compiler.txt
           grep -q lmscript compiler.txt || { echo "no v5 compiler available"; exit 1; }
 

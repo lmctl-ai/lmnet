@@ -11,8 +11,6 @@ endif()
 option(LMNET_FULL_STATIC "Link the complete executable statically" ON)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(LMNET_HOST_SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/schema/lmnet.host.json")
-set(LMNET_STD_SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/cpp/std/lmcode-std.schema.json")
-set(LMNET_MERGE_HELPER "${CMAKE_CURRENT_SOURCE_DIR}/scripts/merge-std.py")
 
 # ---- vendored iputils subset ------------------------------------------------
 # third_party/iputils is git-ignored and synced by scripts/sync-iputils.sh,
@@ -63,13 +61,9 @@ set(IPERF3_SOURCES
 list(TRANSFORM IPERF3_SOURCES PREPEND "${IPERF3_ROOT}/src/")
 set(IPERF3_MAIN "${IPERF3_ROOT}/src/main.c")
 
-# ---- effective schema (host fragment merged with the lmcode std catalog) ----
+# ---- exact host-only schema; std is implicit in compiler 0.2.420 ----
 set(SCHEMA_JSON "${CMAKE_CURRENT_SOURCE_DIR}/schema/lmnet.dsl.json")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${LMNET_HOST_SCHEMA}" "${LMNET_STD_SCHEMA}" "${LMNET_MERGE_HELPER}")
-execute_process(COMMAND "${Python3_EXECUTABLE}" "${LMNET_MERGE_HELPER}" "${LMNET_HOST_SCHEMA}" "${SCHEMA_JSON}" RESULT_VARIABLE LMNET_MERGE_RESULT ERROR_VARIABLE LMNET_MERGE_ERROR)
-if(NOT LMNET_MERGE_RESULT EQUAL 0)
-  message(FATAL_ERROR "failed to merge lmcode std schema: ${LMNET_MERGE_ERROR}")
-endif()
+configure_file("${LMNET_HOST_SCHEMA}" "${SCHEMA_JSON}" COPYONLY)
 set(GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 set(GENERATED_SCHEMA "${GENERATED_DIR}/schema_embedded.hpp")
 add_custom_command(

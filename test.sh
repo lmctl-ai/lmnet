@@ -43,12 +43,13 @@ python3 - "$WORK/embedded-schema.json" <<'PY'
 import json,sys
 d=json.load(open(sys.argv[1]))  # strict: must be valid JSON
 assert d.get('name')=='lmnet', d.get('name')
-for t in ('Net','Iface','IfaceList','Route','RouteList','StrList'):
+for t in ('Net','Iface','IfaceList','Route','RouteList'):
     assert t in d.get('types',{}), t
-print('embedded schema: name lmnet, Net/Iface/IfaceList + std StrList present')
+assert 'StrList' not in d['types'], 'standard types must stay implicit'
+print('embedded schema: host-only Net/Iface/IfaceList and route types')
 PY
-cmp schema/lmnet.dsl.json "$WORK/embedded-schema.json" || fail "embedded schema differs from merged schema bytes"
-ok "--dsl-schema --json prints byte-identical merged schema bytes"
+cmp schema/lmnet.dsl.json "$WORK/embedded-schema.json" || fail "embedded schema differs from host-only schema bytes"
+ok "--dsl-schema --json prints byte-identical host-only schema bytes"
 "$HOST" --dsl-schema >"$WORK/schema-summary.txt" || fail "schema summary print"
 python3 - "$WORK/schema-summary.txt" <<'PY'
 import subprocess,sys
@@ -445,5 +446,22 @@ ok "examples compile and their expected output matches"
 LDD_OUT="$(ldd "$HOST" 2>&1 || true)"
 [[ "$LDD_OUT" == *'not a dynamic executable'* ]] || fail "host is not fully static: $LDD_OUT"
 ok "host is fully static ($(stat_size "$HOST") bytes, ldd clean)"
+
+# The published compiler injects std; the host embeds only its own schema bytes.
+"$LMSCRIPT" --dsl-signatures schema/lmnet.dsl.json --without-std > "$WORK/std-host-only.sig"
+"$LMSCRIPT" --dsl-signatures cpp/std/lmcode-std.schema.json > "$WORK/std-builtins.sig"
+"$HOST" --dsl-signatures > "$WORK/std-registry.sig"
+python3 - "$WORK" <<'PYSTD'
+import pathlib,sys,json
+w=pathlib.Path(sys.argv[1])
+read=lambda name:set((w/name).read_text().splitlines())
+assert read('std-registry.sig')-read('std-builtins.sig') == read('std-host-only.sig'), 'host-only registry drift'
+schema=str(pathlib.Path('schema/lmnet.dsl.json').resolve()).replace('\\','/')
+out=str(w/'std-probe.dslb').replace('\\','/')
+(w/'std-probe.lms').write_text('p = _lmcode_ schema='+json.dumps(schema)+';\nlet values = str_list().add("abc");\nif (str_len(values.at(0)) != 3) { let bad = int_list().at(0); }\nend _lmcode_\nsavedsl(p, '+json.dumps(out)+');\n')
+PYSTD
+"$LMSCRIPT" "$WORK/std-probe.lms" > "$WORK/std-probe.log" 2>&1 || { cat "$WORK/std-probe.log"; fail "implicit std compile"; }
+"$HOST" --dsl "$WORK/std-probe.dslb" > "$WORK/std-run.log" 2>&1 || { cat "$WORK/std-run.log"; fail "implicit std runtime"; }
+ok "host-only signatures and implicit std runtime"
 
 echo "PASS: $pass checks"

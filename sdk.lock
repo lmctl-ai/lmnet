@@ -1,5 +1,5 @@
 repo=https://github.com/lmctl-ai/lmcode-cpp
-commit=53b9bdf851875ab904518e92347934b83874c706
+commit=f08733e6b7b44d3f60d9137c7232442e2deefa42
 sha256.cpp/dslvm.hpp=bcbc66d13d1cd4bb0712a1b13b6ad6b1c8c04be34e079d9a3f22dbc3b446180f
 sha256.scripts/merge-std.py=30d832c8d5ab37bdd0583c72758fb14882db74dba26d99249d0536bef77f1f4b
 sha256.cpp/std/lmcode-std.schema.json=cfe31e8b34fdcc33a13e456e80fa9d05a5e6c8fed5b98988abd24ac8570e65e0

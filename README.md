@@ -123,3 +123,5 @@ iputils, whose per-tool licenses are listed in `THIRD_PARTY_NOTICES.md`
 the compiled executable is
 a combined work whose distribution is governed by those upstream licenses.
 Made by **Lattice Systems LLC**.
+
+Compiler minimum: lmscript 0.2.420. The embedded schema contains only host declarations; string, math, collection and file std functions are implicit.
