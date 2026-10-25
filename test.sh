@@ -344,6 +344,104 @@ ok "bytecode: net.socket_summary through the DSL"
 kill "$SUMMARY_SRV_PID" 2>/dev/null || true
 SUMMARY_SRV_PID=""
 
+# --- scan subcommand (TCP connect port scanner; nmap-lite) ---
+# Deterministic on loopback: pin one TCP listener on 127.0.0.1:15355 and
+# compare its verdict against a definitely-closed port (15356 refused).
+# 15353 belongs to the fake DNS server (UDP), 15354 to the summary listener.
+cat > "$WORK/scan-server.py" <<'PY'
+import socket, time
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", 15355))
+s.listen(5)
+end = time.time() + 60
+while time.time() < end:
+    s.settimeout(1)
+    try:
+        conn, _ = s.accept()
+        conn.close()  # answer probes so the accept queue never fills
+    except socket.timeout:
+        pass
+PY
+python3 "$WORK/scan-server.py" &
+SCAN_SRV_PID=$!
+for _ in $(seq 1 25); do
+  if "$HOST" scan 127.0.0.1 --ports 15355 --timeout 200 2>/dev/null |
+     grep -q '"state":"open"'; then break; fi
+  sleep 0.2
+done
+
+out="$("$HOST" scan 127.0.0.1 --ports 15355,15356 --timeout 500)"
+SCAN_OUT="$out" python3 - <<'PY'
+import json, os
+r = json.loads(os.environ["SCAN_OUT"])  # strict: must be valid JSON
+assert r["host"] == "127.0.0.1", r
+assert r["resolved"] == "127.0.0.1", r
+assert r["open"] == 1 and r["closed"] == 1 and r["filtered"] == 0, r
+by_port = {p["port"]: p for p in r["ports"]}
+assert set(by_port) == {15355, 15356}, r
+assert by_port[15355]["state"] == "open", r
+assert by_port[15355]["service"] == "", r  # 15355 has no well-known name
+assert by_port[15356]["state"] == "closed", r
+print("scan:", r["open"], "open,", r["closed"], "closed,", r["filtered"], "filtered")
+PY
+ok "scan: loopback open/closed verdicts with service names"
+
+out="$("$HOST" scan 127.0.0.1 --timeout 200)"
+DEF_SCAN_OUT="$out" python3 - <<'PY'
+import json, os
+r = json.loads(os.environ["DEF_SCAN_OUT"])  # strict: must be valid JSON
+top15 = {22, 53, 80, 110, 143, 443, 465, 587, 993, 995,
+         3306, 5432, 6379, 8080, 8443}
+scanned = {p["port"] for p in r["ports"]}
+open_ports = {p["port"] for p in r["ports"] if p["state"] == "open"}
+assert scanned == top15, r  # default spec is exactly the built-in top-15
+assert len(r["ports"]) == 15, r
+assert r["open"] + r["closed"] + r["filtered"] == 15, r
+assert open_ports <= top15, r
+print("scan default top-15: open ports:", sorted(open_ports))
+PY
+ok "scan: default top-15 ports, counts sum to 15"
+
+# .invalid is RFC-2606 guaranteed NXDOMAIN, so this stays offline-safe; a
+# sandbox without DNS at all still fails resolution, which is the assertion.
+set +e; "$HOST" scan nonexistent-hostname-for-lmnet-test.invalid --timeout 200 \
+  >"$WORK/scan-dns.out" 2>"$WORK/scan-dns.err"; code=$?; set -e
+[ "$code" = 1 ] || fail "scan unresolvable host exits 1 (got $code): $(cat "$WORK/scan-dns.out")"
+[ -s "$WORK/scan-dns.err" ] || fail "scan resolution failure writes stderr"
+grep -q 'lmnet scan' "$WORK/scan-dns.err" || \
+  fail "scan error names the tool: $(cat "$WORK/scan-dns.err")"
+ok "scan failure exits 1 with 'lmnet scan' on stderr"
+
+set +e
+"$HOST" scan 127.0.0.1 --ports banana >/dev/null 2>&1; c1=$?
+"$HOST" scan 127.0.0.1 --ports 0 >/dev/null 2>&1; c2=$?
+"$HOST" scan 127.0.0.1 --ports 70000 >/dev/null 2>&1; c3=$?
+set -e
+{ [ "$c1" = 2 ] && [ "$c2" = 2 ] && [ "$c3" = 2 ]; } || \
+  fail "bad --ports specs must exit 2 (banana=$c1 zero=$c2 70000=$c3)"
+ok "scan rejects bad port specs (exit 2)"
+
+cat > "$WORK/sockscan.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+println("check open: " + str(net.check("127.0.0.1", 15355)));
+println("check closed: " + str(net.check("127.0.0.1", 15356)));
+let r = net.scan("127.0.0.1", "15355");
+println("scan open=" + str(r.open()));
+println("scan resolved=" + r.resolved());
+end _dsl_
+savedsl(p, "$WORK/sockscan.dslb");
+EOF
+"$LMSCRIPT" "$WORK/sockscan.lms" "$WORK/sockscan.dslb" >/dev/null || fail "sockscan compile"
+out="$("$HOST" --dsl "$WORK/sockscan.dslb")"
+grep -q '^check open: true$' <<<"$out" || fail "net.check open port: $out"
+grep -q '^check closed: false$' <<<"$out" || fail "net.check closed port: $out"
+grep -q '^scan open=1$' <<<"$out" || fail "net.scan open count: $out"
+grep -q '^scan resolved=127\.0\.0\.1$' <<<"$out" || fail "net.scan resolved: $out"
+ok "bytecode: net.check + net.scan through the DSL"
+kill "$SCAN_SRV_PID" 2>/dev/null || true
+SCAN_SRV_PID=""
+
 # --- route subcommand (rtnetlink dump, ip route-lite) ---
 out="$("$HOST" route)"
 ROUTE_OUT="$out" python3 - <<'PY'
@@ -691,7 +789,7 @@ ok "multiple bytecode files run sequentially"
 
 # --- examples compile and run ---
 mkdir -p build
-for f in counters dns-lookup dns-query interfaces link neigh routes rule sockets sockets-summary trace; do
+for f in counters dns-lookup dns-query interfaces link neigh routes rule scan sockets sockets-summary trace; do
   [ -f "examples/$f.lms" ] || continue
   "$LMSCRIPT" "examples/$f.lms" "build/$f.dslb" >"$WORK/$f.compile.log" 2>&1 || fail "$f example compile"
   "$HOST" --dsl "build/$f.dslb" >"$WORK/$f.out" || fail "$f example run"

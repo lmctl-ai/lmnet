@@ -9,6 +9,7 @@
 #include "rule.hpp"
 #include "counters.hpp"
 #include "trace.hpp"
+#include "scan.hpp"
 #include "dslvm.hpp"
 #include "schema_embedded.hpp"
 
@@ -48,6 +49,9 @@ struct Host {
   std::vector<std::unique_ptr<std::vector<lmnet::DnsAnswer *>>> dns_answer_lists;
   std::vector<std::unique_ptr<lmnet::TraceResult>> traces;
   std::vector<std::unique_ptr<std::vector<lmnet::Hop *>>> hop_lists;
+  std::vector<std::unique_ptr<lmnet::ScanResult>> scan_results;
+  std::vector<std::unique_ptr<std::vector<lmnet::ScannedPort *>>> port_lists;
+  std::vector<std::unique_ptr<lmnet::ScannedPort>> ports;
   template <class T>
   Value hold(std::vector<std::unique_ptr<T>> &arena, const char *type, T value) {
     if (arena.size() >= 65536)
@@ -117,6 +121,18 @@ lmnet::SocketSummary *socket_summary_of(void *p, const char *who) {
   auto *s = self<lmnet::SocketSummary>(p);
   if (!s) throw dslvm::Error(std::string(who) + ": stale SocketSummary handle");
   return s;
+}
+
+lmnet::ScanResult *scan_result_of(void *p, const char *who) {
+  auto *r = self<lmnet::ScanResult>(p);
+  if (!r) throw dslvm::Error(std::string(who) + ": stale ScanResult handle");
+  return r;
+}
+
+lmnet::ScannedPort *port_of(void *p, const char *who) {
+  auto *sp = self<lmnet::ScannedPort>(p);
+  if (!sp) throw dslvm::Error(std::string(who) + ": stale Port handle");
+  return sp;
 }
 
 std::string json_escape(const std::string &s) {
@@ -243,6 +259,24 @@ std::string hop_json(const lmnet::Hop &h) {
          ",\"from\":" + json_string(h.from) +
          ",\"rtt_ms\":" + rtt +
          ",\"reached\":" + (h.reached ? "true" : "false") + "}";
+}
+
+// nmap-lite: {"host":..., "resolved":..., "ports":[{port, state, service}],
+// "open":n, "closed":n, "filtered":n}; ports sorted ascending, every entry
+// carries a service string ("" when unknown).
+std::string scan_json(const lmnet::ScanResult &r) {
+  std::string out = std::string("{\"host\":") + json_string(r.host) +
+                    ",\"resolved\":" + json_string(r.resolved) + ",\"ports\":[";
+  for (size_t i = 0; i < r.ports.size(); ++i) {
+    if (i) out += ",";
+    out += std::string("{\"port\":") + std::to_string(r.ports[i].number) +
+           ",\"state\":" + json_string(r.ports[i].state) +
+           ",\"service\":" + json_string(r.ports[i].service) + "}";
+  }
+  out += "],\"open\":" + std::to_string(r.open) +
+         ",\"closed\":" + std::to_string(r.closed) +
+         ",\"filtered\":" + std::to_string(r.filtered) + "}";
+  return out;
 }
 
 // ---- DSL registry: the schema implementation ----
@@ -711,6 +745,78 @@ void register_host(dslvm::Registry &reg, Host &host) {
       throw dslvm::Error("HopList.at index out of range");
     return Value::object("Hop", v->at(static_cast<size_t>(i)));
   });
+
+  // nmap-lite over the same engine as `lmnet scan`; DSL scans keep the
+  // defaults (750 ms per connect, 64 workers) since the schema has no
+  // timeout parameter.
+  reg.method("Net", "scan", {"string", "string"}, "ScanResult", [&host](void *, Args &args) {
+    std::string error;
+    auto result = lmnet::scan(args[0].s, args[1].s, 750, 64, error);
+    if (!error.empty())
+      throw dslvm::Error("scan: " + error);
+    // Hold the result first: the PortList points at separately held copies.
+    Value res = host.hold(host.scan_results, "ScanResult", std::move(result));
+    auto *held = self<lmnet::ScanResult>(res.obj);
+    std::vector<lmnet::ScannedPort *> ptrs;
+    ptrs.reserve(held->ports.size());
+    for (auto &port : held->ports) {
+      host.ports.push_back(std::make_unique<lmnet::ScannedPort>(port));
+      ptrs.push_back(host.ports.back().get());
+    }
+    host.hold(host.port_lists, "PortList", std::move(ptrs));
+    return res;
+  });
+
+  reg.method("Net", "check", {"string", "int"}, "bool", [](void *, Args &args) {
+    // Single-port probe, fixed 750 ms timeout: every network condition
+    // (resolution failure, refusal, timeout) is false, never an exception.
+    return Value::boolean(lmnet::check_port(args[0].s, static_cast<int>(args[1].i), 750));
+  });
+
+  reg.method("ScanResult", "host", {}, "string", [](void *s, Args &) {
+    return Value::string(scan_result_of(s, "host")->host);
+  });
+  reg.method("ScanResult", "resolved", {}, "string", [](void *s, Args &) {
+    return Value::string(scan_result_of(s, "resolved")->resolved);
+  });
+  reg.method("ScanResult", "open", {}, "int", [](void *s, Args &) {
+    return Value::integer(scan_result_of(s, "open")->open);
+  });
+  reg.method("ScanResult", "closed", {}, "int", [](void *s, Args &) {
+    return Value::integer(scan_result_of(s, "closed")->closed);
+  });
+  reg.method("ScanResult", "filtered", {}, "int", [](void *s, Args &) {
+    return Value::integer(scan_result_of(s, "filtered")->filtered);
+  });
+  reg.method("ScanResult", "ports", {}, "PortList", [&host](void *s, Args &) {
+    auto *result = scan_result_of(s, "ports");
+    std::vector<lmnet::ScannedPort *> ptrs;
+    ptrs.reserve(result->ports.size());
+    for (auto &port : result->ports)
+      ptrs.push_back(port_of(host.hold(host.ports, "Port", port).obj, "ports"));
+    return host.hold(host.port_lists, "PortList", std::move(ptrs));
+  });
+
+  reg.method("Port", "number", {}, "int", [](void *s, Args &) {
+    return Value::integer(port_of(s, "number")->number);
+  });
+  reg.method("Port", "state", {}, "string", [](void *s, Args &) {
+    return Value::string(port_of(s, "state")->state);
+  });
+  reg.method("Port", "service", {}, "string", [](void *s, Args &) {
+    return Value::string(port_of(s, "service")->service);
+  });
+  reg.method("PortList", "len", {}, "int", [](void *s, Args &) {
+    return Value::integer(
+        static_cast<int64_t>(self<std::vector<lmnet::ScannedPort *>>(s)->size()));
+  });
+  reg.method("PortList", "at", {"int"}, "Port", [](void *s, Args &args) {
+    const auto *v = self<std::vector<lmnet::ScannedPort *>>(s);
+    const int64_t i = args[0].i;
+    if (i < 0 || static_cast<size_t>(i) >= v->size())
+      throw dslvm::Error("PortList.at index out of range");
+    return Value::object("Port", v->at(static_cast<size_t>(i)));
+  });
 }
 
 void print_schema_summary(const dslvm::Registry &reg) {
@@ -751,6 +857,7 @@ int main(int argc, char **argv) {
       "       lmnet counters        # kernel networking counters as JSON (netstat -s/nstat-lite)\n"
       "       lmnet sockets [tcp|udp|unix] [--listen] [--summary]  # socket tables (netstat/lsof -i-lite, ss -s-lite)\n"
       "       lmnet trace HOST [maxttl]  # UDP-probe traceroute as JSON (traceroute-lite)\n"
+      "       lmnet scan HOST [--ports SPEC] [--timeout MS] [--concurrency N]  # TCP connect port scanner as JSON (nmap-lite)\n"
       "       lmnet iperf3 [iperf3 options]   # the real iperf3 engine (client/server)\n"
       "       lmnet --dsl FILE [FILE ...]\n";
   if (argc == 2 && std::string(argv[1]) == "--version") {
@@ -990,6 +1097,54 @@ int main(int argc, char **argv) {
       std::cout << hop_json(result.hops[i]);
     }
     std::cout << "]}\n";
+    return std::cout ? 0 : 4;
+  }
+  if (argc >= 3 && std::string(argv[1]) == "scan") {
+    std::string ports_spec;
+    int timeout_ms = 750;
+    int concurrency = 64;
+    auto parse_int = [](const char *s, int *out) {
+      char *end = nullptr;
+      const long v = std::strtol(s, &end, 10);
+      if (!end || *end != '\0' || v < -2147483648L || v > 2147483647L)
+        return false;
+      *out = static_cast<int>(v);
+      return true;
+    };
+    for (int i = 3; i < argc; ++i) {
+      const std::string arg = argv[i];
+      if (arg == "--ports" && i + 1 < argc) {
+        ports_spec = argv[++i];
+      } else if (arg == "--timeout" && i + 1 < argc) {
+        if (!parse_int(argv[++i], &timeout_ms)) {
+          std::cerr << usage;
+          return 2;
+        }
+        timeout_ms = std::max(100, std::min(30000, timeout_ms));
+      } else if (arg == "--concurrency" && i + 1 < argc) {
+        if (!parse_int(argv[++i], &concurrency)) {
+          std::cerr << usage;
+          return 2;
+        }
+        concurrency = std::max(1, std::min(512, concurrency));
+      } else {
+        std::cerr << usage;
+        return 2;
+      }
+    }
+    std::vector<int> port_check;
+    std::string why;
+    if (!lmnet::parse_ports(ports_spec, port_check, why)) {
+      std::cerr << usage;
+      return 2;
+    }
+    std::string error;
+    auto result = lmnet::scan(argv[2], ports_spec, timeout_ms, concurrency, error);
+    if (!error.empty()) {
+      std::cerr << "lmnet scan: " << argv[2] << ": " << error << "\n";
+      return 1;
+    }
+    std::cout << scan_json(result) << "\n";
     return std::cout ? 0 : 4;
   }
   if (argc >= 3 && std::string(argv[1]) == "--dsl") {

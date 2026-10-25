@@ -7,7 +7,7 @@ a debug and research CLI you can also drive from
 
 The long-term goal is to combine the common Linux network toolbox (`ping`,
 `ip`, `netstat`, `lsof`, `traceroute`, `mtr`, `tracepath`, `dig`,
-`nslookup`, `iftop`, `iperf3`) behind one CLI and one scripting surface.
+`nslookup`, `iftop`, `iperf3`, `nmap`) behind one CLI and one scripting surface.
 Today lmnet ships the first slices: the iputils `ping` and `tracepath`
 engines, the real iperf3 engine, plus `dns` (nslookup-lite), `dig`
 (dig-lite: real DNS messages over
@@ -15,8 +15,9 @@ UDP), `ifaddrs` (`ip addr`-lite) built on libc, `route` (`ip route`-lite
 over rtnetlink), `neigh` (`ip neigh`-lite over rtnetlink), `rule`
 (`ip rule`-lite over rtnetlink), `link`
 (`ip -s link`-lite over rtnetlink), `counters` (netstat -s/nstat-lite from
-/proc/net), and `trace` (traceroute-lite: UDP probes, ICMP answers,
-structured hop list). Packet capture stays
+/proc/net), `trace` (traceroute-lite: UDP probes, ICMP answers,
+structured hop list), and `scan` (nmap-lite: TCP connect port scanner
+with parallel workers, structured verdicts). Packet capture stays
 with the sibling project lmshark (Wireshark/tcpdump territory); URL fetching
 will be lmcurl.
 
@@ -51,6 +52,7 @@ lmnet link                                    # link devices + RX/TX counters as
 lmnet counters                                # kernel networking counters as JSON (netstat -s/nstat-lite)
 lmnet sockets [tcp|udp|unix] [--listen] [--summary]  # socket tables as JSON (netstat/lsof -i-lite, ss -s-lite)
 lmnet trace HOST [maxttl]                     # UDP-probe traceroute as JSON (traceroute-lite)
+lmnet scan HOST [--ports SPEC] [--timeout MS] [--concurrency N]  # TCP connect port scanner as JSON (nmap-lite)
 lmnet --dsl FILE [FILE ...]
 ```
 
@@ -115,6 +117,32 @@ structured traceroute-lite: one UDP probe per TTL to a high unprivileged port
 port-unreachable. IPv4-only in this slice (IPv6-only names fail cleanly), and
 reading ICMP needs root or CAP_NET_RAW. Unlike the vendored `tracepath`,
 `trace` is structured data: every hop is a DSL object via `net.trace`.
+`scan` is a TCP connect port scanner (nmap-lite): it resolves HOST
+(IPv4/IPv6 via getaddrinfo), then probes every port with a non-blocking
+connect + poll + SO_ERROR, spread over up to `--concurrency` parallel
+`std::thread` workers (default 64, clamped 1-512). Each port gets one of
+three verdicts — `open` (connected), `closed` (ECONNREFUSED), or
+`filtered` (timeout or any other error) — and the scan prints as
+`{"host": ..., "resolved": ..., "ports": [{port, state, service}],
+"open": n, "closed": n, "filtered": n}` with the ports sorted ascending
+and a well-known `service` name on every entry ("" when unknown; the
+built-in table covers ssh/http/https/dns/mysql/postgres/redis and the
+other usual suspects). `--ports` takes a comma list and/or ranges
+(`80`, `22,53,80`, `1-1024`, `80,8000-8010`; anything outside 1-65535
+or malformed is a usage error, and the list is deduped and sorted), with
+the built-in top-15 (22, 53, 80, 110, 143, 443, 465, 587, 993, 995,
+3306, 5432, 6379, 8080, 8443) as the default; `--timeout` is the
+per-connect timeout in ms (default 750, clamped 100-30000). This is
+connect-scan only — no SYN or UDP scanning — so it needs no root or raw
+sockets, and IPv6 rides the same code path. In the DSL the same engine
+is `net.scan(host, ports_spec)` returning a `ScanResult`
+(`host`/`resolved`/`open`/`closed`/`filtered` plus a `PortList` of
+`Port{number, state, service}` via `ports()`); DSL scans keep the
+defaults (750 ms per connect, 64 workers) since the schema has no
+timeout parameter. `net.check(host, port)` is the single-port boolean
+form — true only when the connect succeeds within the same fixed 750 ms,
+false on every network condition, and it never throws for network
+errors.
 
 ## Scripting
 
@@ -170,6 +198,9 @@ Windows port upstream to wrap.
   remains the `dns` subcommand/`net.dns_lookup`)
 - `iperf3` throughput engine delivered as the `lmnet iperf3` subcommand (real
   iperf 3.22 client/server); throughput runs as DSL objects remain
+- `nmap` — TCP connect port-scan-lite delivered as `lmnet scan` /
+  `net.scan` + `net.check` (connect-scan only, no SYN/UDP scanning and no
+  root needed; raw-packet techniques stay out)
 
 ## License and company
 

@@ -1,0 +1,31 @@
+# Chapter: Basics - TCP port scan (nmap-lite)
+# Shows: net.scan, net.check, ScanResult host/resolved/open/closed/filtered/ports,
+#        Port number/state/service, PortList len/at
+# Run: lmscript examples/scan.lms      (then: lmnet --dsl build/scan.dslb)
+# Needs: nothing (offline); probes 127.0.0.1 port 1, which is closed on
+#        practically every machine — but the verdict is data, not an error,
+#        so no assertion pins it and only the framing lines are pinned.
+#        net.scan uses the shared CLI engine with its defaults (750 ms per
+#        connect, 64 workers); net.check is a single-port boolean probe with
+#        the same fixed 750 ms timeout and never throws for network errors.
+# exit: 0
+# expect:
+#|scanning 127.0.0.1 port 1
+#|scan done
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+
+println("scanning 127.0.0.1 port 1");
+println("check: reachable=" + str(net.check("127.0.0.1", 1)));
+let r = net.scan("127.0.0.1", "1");
+println("resolved: " + r.resolved());
+println("open=" + str(r.open()) + " closed=" + str(r.closed()) +
+        " filtered=" + str(r.filtered()));
+let ports = r.ports();
+for (i in range(0, ports.len())) {
+  let sp = ports.at(i);
+  println("  port " + str(sp.number()) + " " + sp.state() + " " + sp.service());
+}
+println("scan done");
+
+end _dsl_
+savedsl(p, "build/scan.dslb");
