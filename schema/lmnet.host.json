@@ -7,6 +7,7 @@
         "dns_lookup": [{"params": ["string"], "returns": "StrList"}],
         "dns_query": [{"params": ["string", "string", "string"], "returns": "DnsResult"}],
         "interfaces": [{"params": [], "returns": "IfaceList"}],
+        "neighbors": [{"params": [], "returns": "NeighborList"}],
         "routes": [{"params": [], "returns": "RouteList"}],
         "sockets": [{"params": ["string", "bool"], "returns": "SocketList"}],
         "trace": [{"params": ["string", "int"], "returns": "TraceResult"}]
@@ -46,6 +47,23 @@
       "methods": {
         "len": [{"params": [], "returns": "int"}],
         "at": [{"params": ["int"], "returns": "Iface"}]
+      }
+    },
+    "Neighbor": {
+      "methods": {
+        "ip": [{"params": [], "returns": "string"}],
+        "dev": [{"params": [], "returns": "string"}],
+        "state": [{"params": [], "returns": "string"}],
+        "mac": [{"params": [], "returns": "string"}],
+        "family": [{"params": [], "returns": "string"}],
+        "router": [{"params": [], "returns": "bool"}],
+        "proxy": [{"params": [], "returns": "bool"}]
+      }
+    },
+    "NeighborList": {
+      "methods": {
+        "len": [{"params": [], "returns": "int"}],
+        "at": [{"params": ["int"], "returns": "Neighbor"}]
       }
     },
     "Route": {

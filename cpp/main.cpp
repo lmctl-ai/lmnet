@@ -4,6 +4,7 @@
 #include "dns.hpp"
 #include "sockets.hpp"
 #include "route.hpp"
+#include "neigh.hpp"
 #include "trace.hpp"
 #include "dslvm.hpp"
 #include "schema_embedded.hpp"
@@ -31,6 +32,8 @@ struct Host {
   std::vector<std::unique_ptr<std::vector<lmnet::Socket *>>> socket_lists;
   std::vector<std::unique_ptr<lmnet::Route>> routes;
   std::vector<std::unique_ptr<std::vector<lmnet::Route *>>> route_lists;
+  std::vector<std::unique_ptr<lmnet::Neighbor>> neighbors;
+  std::vector<std::unique_ptr<std::vector<lmnet::Neighbor *>>> neighbor_lists;
   std::vector<std::unique_ptr<lmnet::DnsResult>> dns_results;
   std::vector<std::unique_ptr<std::vector<lmnet::DnsAnswer *>>> dns_answer_lists;
   std::vector<std::unique_ptr<lmnet::TraceResult>> traces;
@@ -74,6 +77,12 @@ lmnet::Hop *hop_of(void *p, const char *who) {
   auto *h = self<lmnet::Hop>(p);
   if (!h) throw dslvm::Error(std::string(who) + ": stale Hop handle");
   return h;
+}
+
+lmnet::Neighbor *neighbor_of(void *p, const char *who) {
+  auto *n = self<lmnet::Neighbor>(p);
+  if (!n) throw dslvm::Error(std::string(who) + ": stale Neighbor handle");
+  return n;
 }
 
 std::string json_escape(const std::string &s) {
@@ -130,6 +139,16 @@ std::string route_json(const lmnet::Route &r) {
          ",\"metric\":" + std::to_string(r.metric) +
          ",\"table\":" + json_string(r.table) +
          ",\"prefsrc\":" + json_string(r.prefsrc) + "}";
+}
+
+std::string neighbor_json(const lmnet::Neighbor &n) {
+  return std::string("{\"ip\":") + json_string(n.ip) +
+         ",\"dev\":" + json_string(n.dev) +
+         ",\"state\":" + json_string(n.state) +
+         ",\"mac\":" + json_string(n.mac) +
+         ",\"family\":" + json_string(n.family) +
+         ",\"router\":" + (n.router ? "true" : "false") +
+         ",\"proxy\":" + (n.proxy ? "true" : "false") + "}";
 }
 
 std::string hop_json(const lmnet::Hop &h) {
@@ -274,6 +293,47 @@ void register_host(dslvm::Registry &reg, Host &host) {
     return Value::object("Route", v->at(static_cast<size_t>(i)));
   });
 
+  reg.method("Net", "neighbors", {}, "NeighborList", [&host](void *, Args &) {
+    std::string error;
+    auto neighs = lmnet::neighbors(error);
+    if (!error.empty())
+      throw dslvm::Error("neighbors: " + error);
+    std::vector<lmnet::Neighbor *> ptrs;
+    for (auto &neigh : neighs) {
+      host.neighbors.push_back(std::make_unique<lmnet::Neighbor>(std::move(neigh)));
+      ptrs.push_back(host.neighbors.back().get());
+    }
+    return host.hold(host.neighbor_lists, "NeighborList", std::move(ptrs));
+  });
+
+  const auto neighbor_method = [&reg](const char *name, auto impl) {
+    reg.method("Neighbor", name, {}, "string", [name, impl](void *s, Args &) {
+      return Value::string(impl(neighbor_of(s, name)));
+    });
+  };
+  neighbor_method("ip", [](const lmnet::Neighbor *n) { return n->ip; });
+  neighbor_method("dev", [](const lmnet::Neighbor *n) { return n->dev; });
+  neighbor_method("state", [](const lmnet::Neighbor *n) { return n->state; });
+  neighbor_method("mac", [](const lmnet::Neighbor *n) { return n->mac; });
+  neighbor_method("family", [](const lmnet::Neighbor *n) { return n->family; });
+  reg.method("Neighbor", "router", {}, "bool", [](void *s, Args &) {
+    return Value::boolean(neighbor_of(s, "router")->router);
+  });
+  reg.method("Neighbor", "proxy", {}, "bool", [](void *s, Args &) {
+    return Value::boolean(neighbor_of(s, "proxy")->proxy);
+  });
+  reg.method("NeighborList", "len", {}, "int", [](void *s, Args &) {
+    return Value::integer(
+        static_cast<int64_t>(self<std::vector<lmnet::Neighbor *>>(s)->size()));
+  });
+  reg.method("NeighborList", "at", {"int"}, "Neighbor", [](void *s, Args &args) {
+    const auto *v = self<std::vector<lmnet::Neighbor *>>(s);
+    const int64_t i = args[0].i;
+    if (i < 0 || static_cast<size_t>(i) >= v->size())
+      throw dslvm::Error("NeighborList.at index out of range");
+    return Value::object("Neighbor", v->at(static_cast<size_t>(i)));
+  });
+
   reg.method("Net", "dns_query", {"string", "string", "string"}, "DnsResult",
              [&host](void *, Args &args) {
                if (!lmnet::dns_type_known(args[1].s))
@@ -416,6 +476,7 @@ int main(int argc, char **argv) {
       "       lmnet dig NAME [TYPE] [@server]  # DNS query (dig-lite)\n"
       "       lmnet ifaddrs         # interfaces with addresses (ip addr-lite)\n"
       "       lmnet route           # routing tables as JSON (ip route-lite)\n"
+      "       lmnet neigh           # neighbor table as JSON (ip neigh-lite)\n"
       "       lmnet sockets [tcp|udp|unix] [--listen]  # socket tables (netstat/lsof -i-lite)\n"
       "       lmnet trace HOST [maxttl]  # UDP-probe traceroute as JSON (traceroute-lite)\n"
       "       lmnet iperf3 [iperf3 options]   # the real iperf3 engine (client/server)\n"
@@ -556,6 +617,21 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < routes.size(); ++i) {
       if (i) std::cout << ",";
       std::cout << route_json(routes[i]);
+    }
+    std::cout << "]\n";
+    return std::cout ? 0 : 4;
+  }
+  if (argc == 2 && std::string(argv[1]) == "neigh") {
+    std::string error;
+    auto neighs = lmnet::neighbors(error);
+    if (!error.empty()) {
+      std::cerr << "lmnet neigh: " << error << "\n";
+      return 1;
+    }
+    std::cout << "[";
+    for (size_t i = 0; i < neighs.size(); ++i) {
+      if (i) std::cout << ",";
+      std::cout << neighbor_json(neighs[i]);
     }
     std::cout << "]\n";
     return std::cout ? 0 : 4;

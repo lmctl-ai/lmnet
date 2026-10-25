@@ -316,6 +316,48 @@ set +e; out="$("$HOST" --dsl "$WORK/routeoob.dslb" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "RouteList.at bounds (exit $code): $out"
 ok "RouteList.at out of range refused (exit 3)"
 
+# --- neigh subcommand (rtnetlink dump, ip neigh/arp-lite) ---
+# Offline-deterministic: a fresh CI box may have an empty table, so nothing
+# here asserts a neighbor exists; only shape and invariants are checked.
+out="$("$HOST" neigh)"
+NEIGH_OUT="$out" python3 - <<'PY'
+import json, os
+neighs = json.loads(os.environ["NEIGH_OUT"])  # strict: must be valid JSON
+for n in neighs:
+    assert n["ip"] and n["dev"] and n["state"], n
+    assert n["family"] in ("ipv4", "ipv6"), n
+    assert set(n) == {"ip", "dev", "state", "mac", "family", "router", "proxy"}, n
+print("neigh:", len(neighs), "entries")
+PY
+ok "neigh: JSON dump, ip/dev/state/family on every entry"
+
+cat > "$WORK/neigh.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+let neighs = net.neighbors();
+println("neighbors: " + str(neighs.len()));
+if (neighs.len() > 0) {
+  let n = neighs.at(0);
+  println("first: " + n.ip() + " dev " + n.dev() + " state " + n.state());
+}
+end _dsl_
+savedsl(p, "$WORK/neigh.dslb");
+EOF
+"$LMSCRIPT" "$WORK/neigh.lms" "$WORK/neigh.dslb" >/dev/null || fail "neigh compile"
+out="$("$HOST" --dsl "$WORK/neigh.dslb")"
+grep -Eq '^neighbors: [0-9]+$' <<<"$out" || fail "neigh bytecode count: $out"
+ok "bytecode: net.neighbors through the DSL"
+
+cat > "$WORK/neighoob.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+net.neighbors().at(9999);
+end _dsl_
+savedsl(p, "$WORK/neighoob.dslb");
+EOF
+"$LMSCRIPT" "$WORK/neighoob.lms" "$WORK/neighoob.dslb" >/dev/null || fail "compile"
+set +e; out="$("$HOST" --dsl "$WORK/neighoob.dslb" 2>&1)"; code=$?; set -e
+[ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "NeighborList.at bounds (exit $code): $out"
+ok "NeighborList.at out of range refused (exit 3)"
+
 # --- trace subcommand (UDP probes + ICMP answers; needs CAP_NET_RAW, skip without) ---
 set +e; out="$("$HOST" trace 127.0.0.1 2>&1)"; code=$?; set -e
 TRACE_RAW=0
@@ -433,7 +475,7 @@ ok "multiple bytecode files run sequentially"
 
 # --- examples compile and run ---
 mkdir -p build
-for f in dns-lookup dns-query interfaces routes sockets trace; do
+for f in dns-lookup dns-query interfaces neigh routes sockets trace; do
   [ -f "examples/$f.lms" ] || continue
   "$LMSCRIPT" "examples/$f.lms" "build/$f.dslb" >"$WORK/$f.compile.log" 2>&1 || fail "$f example compile"
   "$HOST" --dsl "build/$f.dslb" >"$WORK/$f.out" || fail "$f example run"

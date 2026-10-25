@@ -83,6 +83,7 @@ add_executable(lmnet
   cpp/dns.cpp
   cpp/sockets.cpp
   cpp/route.cpp
+  cpp/neigh.cpp
   cpp/trace.cpp
   ${IPUTILS_SOURCES}
   ${IPERF3_SOURCES}

@@ -1,0 +1,27 @@
+# Chapter: Basics - neighbor table (ARP/NDP)
+# Shows: net.neighbors, Neighbor.ip/dev/state/mac/family/router/proxy,
+#        NeighborList len/at
+# Run: lmscript examples/neigh.lms      (then: lmnet --dsl build/neigh.dslb)
+# Needs: nothing (offline); rtnetlink dumps the kernel neighbor table
+#        directly. The table may be empty on a fresh machine, so only the
+#        constant lines are asserted.
+# exit: 0
+# expect:
+#|neighbor table
+#|neighbor dump complete
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+
+println("neighbor table");
+let neighs = net.neighbors();
+println("entries: " + str(neighs.len()));
+for (i in range(0, neighs.len())) {
+  let n = neighs.at(i);
+  let mac = n.mac();
+  if (mac == "") { mac = "-"; }
+  println("  " + n.ip() + " dev " + n.dev() + " state " + n.state() +
+          " lladdr " + mac + " family " + n.family());
+}
+println("neighbor dump complete");
+
+end _dsl_
+savedsl(p, "build/neigh.dslb");

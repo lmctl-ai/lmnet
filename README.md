@@ -42,6 +42,7 @@ lmnet dns HOST                                # resolve addresses (nslookup-lite
 lmnet dig NAME [TYPE] [@server]               # DNS query as JSON (dig-lite)
 lmnet ifaddrs                                 # interfaces + addresses as JSON (ip addr-lite)
 lmnet route                                   # routing tables as JSON (ip route-lite)
+lmnet neigh                                   # neighbor table as JSON (ip neigh-lite)
 lmnet sockets [tcp|udp|unix] [--listen]       # socket tables as JSON (netstat/lsof -i-lite)
 lmnet trace HOST [maxttl]                     # UDP-probe traceroute as JSON (traceroute-lite)
 lmnet --dsl FILE [FILE ...]
@@ -57,7 +58,11 @@ so a dead resolver fails fast) and prints one JSON object
 `{"rcode": ..., "answers": [{name, type, ttl, data}]}` — try
 `lmnet dig example.com A @1.1.1.1`. `route` dumps every kernel routing table
 over rtnetlink (IPv4 + IPv6, `ip route show table all`-style) as
-`[{dest, via, dev, proto, scope, metric, table, prefsrc}]`. `trace` is a
+`[{dest, via, dev, proto, scope, metric, table, prefsrc}]`. `neigh` dumps the
+ARP/NDP neighbor table over rtnetlink (`ip neigh`/`arp`-lite) as
+`[{ip, dev, state, mac, family, router, proxy}]`, where `state` is the
+lowercased kernel NUD state, `mac` is "" when the kernel has no link-layer
+address, and `router`/`proxy` mirror the NTF flags. `trace` is a
 structured traceroute-lite: one UDP probe per TTL to a high unprivileged port
 (33434+ttl), ICMP answers on a raw socket, printed as
 `{"dest_ip": ..., "hops": [{ttl, from, rtt_ms, reached}]}` — a silent hop is
@@ -102,7 +107,8 @@ Windows port upstream to wrap.
 ## Roadmap
 
 - `ip` — `route` delivered over rtnetlink as `lmnet route` / `net.routes`
-  (`addr` already covered by `ifaddrs`); `link` remains (iproute2 sources)
+  (`addr` already covered by `ifaddrs`, `neigh` delivered as `lmnet neigh` /
+  `net.neighbors`); `link` remains (iproute2 sources)
 - `traceroute`/`mtr` — traceroute-lite delivered over UDP/ICMP as
   `lmnet trace` / `net.trace` (IPv4, one probe per TTL); mtr-style repeated
   probes remain
