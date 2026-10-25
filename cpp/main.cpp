@@ -18,6 +18,7 @@
 
 extern "C" int lmnet_ping_main(int argc, char **argv);
 extern "C" int lmnet_tracepath_main(int argc, char **argv);
+extern "C" int lmnet_iperf3_main(int argc, char **argv);
 
 namespace {
 using dslvm::Args;
@@ -417,6 +418,7 @@ int main(int argc, char **argv) {
       "       lmnet route           # routing tables as JSON (ip route-lite)\n"
       "       lmnet sockets [tcp|udp|unix] [--listen]  # socket tables (netstat/lsof -i-lite)\n"
       "       lmnet trace HOST [maxttl]  # UDP-probe traceroute as JSON (traceroute-lite)\n"
+      "       lmnet iperf3 [iperf3 options]   # the real iperf3 engine (client/server)\n"
       "       lmnet --dsl FILE [FILE ...]\n";
   if (argc == 2 && std::string(argv[1]) == "--version") {
     std::cout << "lmnet " LMNET_VERSION "\n";
@@ -443,6 +445,8 @@ int main(int argc, char **argv) {
     run_tool(lmnet_ping_main, "ping", argc - 2, argv + 2);
   if (argc >= 3 && std::string(argv[1]) == "tracepath")
     run_tool(lmnet_tracepath_main, "tracepath", argc - 2, argv + 2);
+  if (argc >= 3 && std::string(argv[1]) == "iperf3")
+    run_tool(lmnet_iperf3_main, "iperf3", argc - 2, argv + 2);
   if (argc == 3 && std::string(argv[1]) == "dns") {
     std::string error;
     auto addrs = lmnet::dns_lookup(argv[2], error);

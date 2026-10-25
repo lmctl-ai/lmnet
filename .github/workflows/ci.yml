@@ -47,10 +47,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: sync iputils (iputils.lock) and verify vendored sdk headers
+      - name: sync iputils + iperf3 sources, verify vendored sdk headers
         if: env.ONLY_OK == 'true'
         run: |
           scripts/sync-iputils.sh
+          scripts/sync-iperf3.sh
           scripts/sync-sdk.sh --verify
 
       - name: toolchain

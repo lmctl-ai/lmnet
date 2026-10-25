@@ -8,8 +8,9 @@ a debug and research CLI you can also drive from
 The long-term goal is to combine the common Linux network toolbox (`ping`,
 `ip`, `netstat`, `lsof`, `traceroute`, `mtr`, `tracepath`, `dig`,
 `nslookup`, `iftop`, `iperf3`) behind one CLI and one scripting surface.
-Today lmnet ships the first slice: the iputils `ping` and `tracepath`
-engines, plus `dns` (nslookup-lite), `dig` (dig-lite: real DNS messages over
+Today lmnet ships the first slices: the iputils `ping` and `tracepath`
+engines, the real iperf3 engine, plus `dns` (nslookup-lite), `dig`
+(dig-lite: real DNS messages over
 UDP), `ifaddrs` (`ip addr`-lite) built on libc, `route` (`ip route`-lite
 over rtnetlink), and `trace` (traceroute-lite: UDP probes, ICMP answers,
 structured hop list). Packet capture stays
@@ -20,6 +21,7 @@ will be lmcurl.
 
 ```sh
 scripts/sync-iputils.sh   # download the pinned iputils source (third_party/, git-ignored)
+scripts/sync-iperf3.sh   # download the pinned iperf3 source (third_party/, git-ignored)
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
@@ -35,6 +37,7 @@ lmnet --dsl-schema [--json]
 lmnet --dsl-signatures
 lmnet ping HOST [iputils ping options]        # the real iputils ping engine
 lmnet tracepath HOST [iputils tracepath options]
+lmnet iperf3 [iperf3 options]                   # the real iperf3 engine (client/server)
 lmnet dns HOST                                # resolve addresses (nslookup-lite)
 lmnet dig NAME [TYPE] [@server]               # DNS query as JSON (dig-lite)
 lmnet ifaddrs                                 # interfaces + addresses as JSON (ip addr-lite)
@@ -45,7 +48,9 @@ lmnet --dsl FILE [FILE ...]
 
 `ping` and `tracepath` are the upstream iputils binaries-in-a-binary: same
 flags, same output, same behavior (including the usual raw-socket permission
-requirements). `dns`, `ifaddrs`, and `route` are structured and print one JSON
+requirements). `iperf3` is the upstream iperf 3.22 engine likewise embedded
+— client and server, same flags and output (built without OpenSSL auth and
+without SCTP, matching iperf's own defaults). `dns`, `ifaddrs`, and `route` are structured and print one JSON
 array; `dig` sends a real RFC 1035 query (UDP, 3 s timeout, connected socket
 so a dead resolver fails fast) and prints one JSON object
 `{"rcode": ..., "answers": [{name, type, ttl, data}]}` — try
@@ -90,8 +95,8 @@ Windows port upstream to wrap.
 - `schema/lmnet.host.json` — the host DSL fragment (merged with the lmcode
   std catalog into the embedded schema at configure time)
 - `examples/` — lmscript examples
-- `scripts/` — vendoring (iputils source, lmcode-cpp SDK) and compiler selection
-- `third_party/` — downloaded upstream sources (git-ignored, pinned by `iputils.lock`)
+- `scripts/` — vendoring (iputils/iperf3 sources, lmcode-cpp SDK) and compiler selection
+- `third_party/` — downloaded upstream sources (git-ignored, pinned by `iputils.lock` / `iperf3.lock`)
 
 ## Roadmap
 
@@ -104,12 +109,14 @@ Windows port upstream to wrap.
 - `dig`/`nslookup` (full DNS messages, not just addresses) — delivered as
   dig-lite: `lmnet dig` + `net.dns_query` (nslookup-style name resolution
   remains the `dns` subcommand/`net.dns_lookup`)
-- `iperf3` throughput runs as DSL objects
+- `iperf3` throughput engine delivered as the `lmnet iperf3` subcommand (real
+  iperf 3.22 client/server); throughput runs as DSL objects remain
 
 ## License and company
 
 lmnet-authored code is MIT licensed (see `LICENSE`). It builds against
 iputils, whose per-tool licenses are listed in `THIRD_PARTY_NOTICES.md`
-(ping BSD-3-Clause, tracepath GPL-2.0-or-later); the compiled executable is
+(ping BSD-3-Clause, tracepath GPL-2.0-or-later), and iperf3 (BSD-3-Clause);
+the compiled executable is
 a combined work whose distribution is governed by those upstream licenses.
 Made by **Lattice Systems LLC**.

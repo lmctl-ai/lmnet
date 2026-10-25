@@ -19,6 +19,8 @@ scripts/sync-sdk.sh --verify >/dev/null || fail "SDK header pin mismatch"
 ok "SDK headers match sdk.lock"
 scripts/sync-iputils.sh --verify >/dev/null || fail "iputils pin mismatch"
 ok "third_party/iputils matches iputils.lock"
+scripts/sync-iperf3.sh --verify >/dev/null || fail "iperf3 pin mismatch"
+ok "third_party/iperf3 matches iperf3.lock"
 
 cmake -S . -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release >"$WORK/cmake.log" 2>&1 ||
   { tail -30 "$WORK/cmake.log" >&2; fail "cmake configure ($BUILD_DIR)"; }
@@ -191,6 +193,42 @@ fi
 "$HOST" tracepath -h >"$WORK/tp.txt" 2>&1 || true
 grep -qi 'usage\|tracepath' "$WORK/tp.txt" || fail "tracepath -h shows usage: $(head -2 "$WORK/tp.txt")"
 ok "tracepath engine runs (usage output)"
+
+# --- iperf3 subcommand (real engine; loopback throughput needs no privileges) ---
+set +e; out="$("$HOST" iperf3 --version 2>&1)"; code=$?; set -e
+[ "$code" = 0 ] || fail "iperf3 --version exits 0 (got $code): $out"
+grep -q 'iperf 3' <<<"$out" || fail "iperf3 --version prints the engine version: $out"
+ok "iperf3 --version (engine $("$HOST" iperf3 --version 2>/dev/null | head -1))"
+
+set +e; "$HOST" iperf3 --bogus >"$WORK/iperf3-bogus.out" 2>&1; code=$?; set -e
+[ "$code" != 0 ] || fail "iperf3 --bogus exits nonzero"
+ok "iperf3 unknown option refused (exit $code)"
+
+# Real localhost run: one-shot server on 127.0.0.1, 1-second client. On
+# Linux loopback this needs no caps; only a genuine failure (bind/loopback
+# broken) after a retry is an error, not an environment skip.
+IPERF3_SRV_PID=""
+iperf3_server_cleanup(){ [ -z "$IPERF3_SRV_PID" ] || kill "$IPERF3_SRV_PID" 2>/dev/null || true; IPERF3_SRV_PID=""; }
+out=""
+for attempt in 1 2; do
+  iperf3_server_cleanup
+  "$HOST" iperf3 -s -1 -B 127.0.0.1 >"$WORK/iperf3-server.log" 2>&1 &
+  IPERF3_SRV_PID=$!
+  sleep 0.5
+  set +e
+  out="$("$HOST" iperf3 -c 127.0.0.1 -t 1 -i 0 2>&1)"
+  code=$?
+  set -e
+  if [ "$code" = 0 ] && grep -q 'bits/sec' <<<"$out"; then
+    break
+  fi
+  [ "$attempt" = 2 ] && fail "iperf3 localhost run failed (exit $code): $out | server: $(cat "$WORK/iperf3-server.log")"
+  sleep 0.5
+done
+grep -Eq '[0-9.]+ (M|G)bits/sec' <<<"$out" || fail "iperf3 run has no throughput line: $out"
+thruput="$(grep -E '[0-9.]+ (M|G)bits/sec' <<<"$out" | tail -1 | sed 's/^ *//')"
+ok "iperf3 localhost throughput run ($thruput)"
+iperf3_server_cleanup
 
 # --- socket tables (netstat/lsof -i-lite) ---
 out="$("$HOST" sockets --listen)"
