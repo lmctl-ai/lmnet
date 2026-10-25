@@ -13,13 +13,13 @@ p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 
 println("resolving localhost");
 let addrs = net.dns_lookup("localhost");
-// 127.0.0.1 must always be there; ::1 presence depends on the host.
+# 127.0.0.1 must always be there; ::1 presence depends on the host.
 if (addrs.contains("127.0.0.1")) {
   println("  127.0.0.1 present");
 } else {
   println("  MISSING 127.0.0.1");
 }
-// every returned address must be numeric (no names left unresolved)
+# every returned address must be numeric (no names left unresolved)
 let numeric = true;
 for (i in range(0, addrs.len())) {
   let a = addrs.at(i);
