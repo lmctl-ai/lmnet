@@ -7,6 +7,7 @@
         "dns_lookup": [{"params": ["string"], "returns": "StrList"}],
         "dns_query": [{"params": ["string", "string", "string"], "returns": "DnsResult"}],
         "interfaces": [{"params": [], "returns": "IfaceList"}],
+        "routes": [{"params": [], "returns": "RouteList"}],
         "sockets": [{"params": ["string", "bool"], "returns": "SocketList"}]
       }
     },
@@ -44,6 +45,24 @@
       "methods": {
         "len": [{"params": [], "returns": "int"}],
         "at": [{"params": ["int"], "returns": "Iface"}]
+      }
+    },
+    "Route": {
+      "methods": {
+        "dest": [{"params": [], "returns": "string"}],
+        "via": [{"params": [], "returns": "string"}],
+        "dev": [{"params": [], "returns": "string"}],
+        "proto": [{"params": [], "returns": "string"}],
+        "scope": [{"params": [], "returns": "string"}],
+        "metric": [{"params": [], "returns": "int"}],
+        "table": [{"params": [], "returns": "string"}],
+        "prefsrc": [{"params": [], "returns": "string"}]
+      }
+    },
+    "RouteList": {
+      "methods": {
+        "len": [{"params": [], "returns": "int"}],
+        "at": [{"params": ["int"], "returns": "Route"}]
       }
     },
     "Socket": {

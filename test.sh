@@ -41,7 +41,7 @@ python3 - "$WORK/embedded-schema.json" <<'PY'
 import json,sys
 d=json.load(open(sys.argv[1]))  # strict: must be valid JSON
 assert d.get('name')=='lmnet', d.get('name')
-for t in ('Net','Iface','IfaceList','StrList'):
+for t in ('Net','Iface','IfaceList','Route','RouteList','StrList'):
     assert t in d.get('types',{}), t
 print('embedded schema: name lmnet, Net/Iface/IfaceList + std StrList present')
 PY
@@ -236,6 +236,47 @@ out="$("$HOST" --dsl "$WORK/socks.dslb")"
 grep -q '^tcp listeners: [1-9]' <<<"$out" || fail "sockets bytecode: $out"
 ok "bytecode: net.sockets through the DSL"
 
+# --- route subcommand (rtnetlink dump, ip route-lite) ---
+out="$("$HOST" route)"
+ROUTE_OUT="$out" python3 - <<'PY'
+import json, os
+routes = json.loads(os.environ["ROUTE_OUT"])  # strict: must be valid JSON
+assert len(routes) >= 1, routes
+assert all(r["dest"] and r["proto"] for r in routes), routes
+assert {r["table"] for r in routes}, routes  # table names/numbers present
+for r in routes:  # a default route is only usable with a gateway or device
+    if r["dest"] == "default":
+        assert r["via"] or r["dev"], r
+print("route:", len(routes), "routes, tables:", ",".join(sorted({r['table'] for r in routes})))
+PY
+ok "route: JSON dump with dest/proto on every route, sane default routes"
+
+cat > "$WORK/routes.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+let routes = net.routes();
+println("routes: " + str(routes.len()));
+let r = routes.at(0);
+println("first: " + r.dest() + " proto=" + r.proto() + " table=" + r.table());
+end _dsl_
+savedsl(p, "$WORK/routes.dslb");
+EOF
+"$LMSCRIPT" "$WORK/routes.lms" "$WORK/routes.dslb" >/dev/null || fail "routes compile"
+out="$("$HOST" --dsl "$WORK/routes.dslb")"
+grep -q '^routes: [1-9]' <<<"$out" || fail "routes bytecode count: $out"
+grep -q '^first: .*proto=' <<<"$out" || fail "routes bytecode first route: $out"
+ok "bytecode: net.routes through the DSL"
+
+cat > "$WORK/routeoob.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+net.routes().at(9999);
+end _dsl_
+savedsl(p, "$WORK/routeoob.dslb");
+EOF
+"$LMSCRIPT" "$WORK/routeoob.lms" "$WORK/routeoob.dslb" >/dev/null || fail "compile"
+set +e; out="$("$HOST" --dsl "$WORK/routeoob.dslb" 2>&1)"; code=$?; set -e
+[ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "RouteList.at bounds (exit $code): $out"
+ok "RouteList.at out of range refused (exit 3)"
+
 # --- DSL bytecode ---
 cat > "$WORK/smoke.lms" <<EOF
 p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
@@ -285,7 +326,7 @@ ok "multiple bytecode files run sequentially"
 
 # --- examples compile and run ---
 mkdir -p build
-for f in dns-lookup dns-query interfaces sockets; do
+for f in dns-lookup dns-query interfaces routes sockets; do
   [ -f "examples/$f.lms" ] || continue
   "$LMSCRIPT" "examples/$f.lms" "build/$f.dslb" >"$WORK/$f.compile.log" 2>&1 || fail "$f example compile"
   "$HOST" --dsl "build/$f.dslb" >"$WORK/$f.out" || fail "$f example run"

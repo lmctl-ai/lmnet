@@ -3,6 +3,7 @@
 #include "net.hpp"
 #include "dns.hpp"
 #include "sockets.hpp"
+#include "route.hpp"
 #include "dslvm.hpp"
 #include "schema_embedded.hpp"
 
@@ -25,6 +26,8 @@ struct Host {
   std::vector<std::unique_ptr<std::vector<lmnet::Iface *>>> iface_lists;
   std::vector<std::unique_ptr<lmnet::Socket>> sockets;
   std::vector<std::unique_ptr<std::vector<lmnet::Socket *>>> socket_lists;
+  std::vector<std::unique_ptr<lmnet::Route>> routes;
+  std::vector<std::unique_ptr<std::vector<lmnet::Route *>>> route_lists;
   std::vector<std::unique_ptr<lmnet::DnsResult>> dns_results;
   std::vector<std::unique_ptr<std::vector<lmnet::DnsAnswer *>>> dns_answer_lists;
   template <class T>
@@ -99,6 +102,17 @@ std::string dns_answer_json(const lmnet::DnsAnswer &a) {
          ",\"type\":" + json_string(a.type) +
          ",\"ttl\":" + std::to_string(a.ttl) +
          ",\"data\":" + json_string(a.data) + "}";
+}
+
+std::string route_json(const lmnet::Route &r) {
+  return std::string("{\"dest\":") + json_string(r.dest) +
+         ",\"via\":" + json_string(r.via) +
+         ",\"dev\":" + json_string(r.dev) +
+         ",\"proto\":" + json_string(r.proto) +
+         ",\"scope\":" + json_string(r.scope) +
+         ",\"metric\":" + std::to_string(r.metric) +
+         ",\"table\":" + json_string(r.table) +
+         ",\"prefsrc\":" + json_string(r.prefsrc) + "}";
 }
 
 // ---- DSL registry: the schema implementation ----
@@ -195,6 +209,45 @@ void register_host(dslvm::Registry &reg, Host &host) {
     return Value::object("Socket", v->at(static_cast<size_t>(i)));
   });
 
+  reg.method("Net", "routes", {}, "RouteList", [&host](void *, Args &) {
+    std::string error;
+    auto routes = lmnet::routes(error);
+    if (!error.empty())
+      throw dslvm::Error("routes: " + error);
+    std::vector<lmnet::Route *> ptrs;
+    for (auto &route : routes) {
+      host.routes.push_back(std::make_unique<lmnet::Route>(std::move(route)));
+      ptrs.push_back(host.routes.back().get());
+    }
+    return host.hold(host.route_lists, "RouteList", std::move(ptrs));
+  });
+
+  const auto route_method = [&reg](const char *name, auto impl) {
+    reg.method("Route", name, {}, "string", [name, impl](void *s, Args &) {
+      return Value::string(impl(self<lmnet::Route>(s)));
+    });
+  };
+  route_method("dest", [](const lmnet::Route *r) { return r->dest; });
+  route_method("via", [](const lmnet::Route *r) { return r->via; });
+  route_method("dev", [](const lmnet::Route *r) { return r->dev; });
+  route_method("proto", [](const lmnet::Route *r) { return r->proto; });
+  route_method("scope", [](const lmnet::Route *r) { return r->scope; });
+  route_method("table", [](const lmnet::Route *r) { return r->table; });
+  route_method("prefsrc", [](const lmnet::Route *r) { return r->prefsrc; });
+  reg.method("Route", "metric", {}, "int", [](void *s, Args &) {
+    return Value::integer(self<lmnet::Route>(s)->metric);
+  });
+  reg.method("RouteList", "len", {}, "int", [](void *s, Args &) {
+    return Value::integer(static_cast<int64_t>(self<std::vector<lmnet::Route *>>(s)->size()));
+  });
+  reg.method("RouteList", "at", {"int"}, "Route", [](void *s, Args &args) {
+    const auto *v = self<std::vector<lmnet::Route *>>(s);
+    const int64_t i = args[0].i;
+    if (i < 0 || static_cast<size_t>(i) >= v->size())
+      throw dslvm::Error("RouteList.at index out of range");
+    return Value::object("Route", v->at(static_cast<size_t>(i)));
+  });
+
   reg.method("Net", "dns_query", {"string", "string", "string"}, "DnsResult",
              [&host](void *, Args &args) {
                if (!lmnet::dns_type_known(args[1].s))
@@ -283,6 +336,7 @@ int main(int argc, char **argv) {
       "       lmnet dns HOST        # resolve addresses (nslookup-lite)\n"
       "       lmnet dig NAME [TYPE] [@server]  # DNS query (dig-lite)\n"
       "       lmnet ifaddrs         # interfaces with addresses (ip addr-lite)\n"
+      "       lmnet route           # routing tables as JSON (ip route-lite)\n"
       "       lmnet sockets [tcp|udp|unix] [--listen]  # socket tables (netstat/lsof -i-lite)\n"
       "       lmnet --dsl FILE [FILE ...]\n";
   if (argc == 2 && std::string(argv[1]) == "--version") {
@@ -404,6 +458,21 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < socks.size(); ++i) {
       if (i) std::cout << ",";
       std::cout << socket_json(socks[i]);
+    }
+    std::cout << "]\n";
+    return std::cout ? 0 : 4;
+  }
+  if (argc == 2 && std::string(argv[1]) == "route") {
+    std::string error;
+    auto routes = lmnet::routes(error);
+    if (!error.empty()) {
+      std::cerr << "lmnet route: " << error << "\n";
+      return 1;
+    }
+    std::cout << "[";
+    for (size_t i = 0; i < routes.size(); ++i) {
+      if (i) std::cout << ",";
+      std::cout << route_json(routes[i]);
     }
     std::cout << "]\n";
     return std::cout ? 0 : 4;

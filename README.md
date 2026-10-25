@@ -10,7 +10,8 @@ The long-term goal is to combine the common Linux network toolbox (`ping`,
 `nslookup`, `iftop`, `iperf3`) behind one CLI and one scripting surface.
 Today lmnet ships the first slice: the iputils `ping` and `tracepath`
 engines, plus `dns` (nslookup-lite), `dig` (dig-lite: real DNS messages over
-UDP), and `ifaddrs` (`ip addr`-lite) built on libc. Packet capture stays
+UDP), `ifaddrs` (`ip addr`-lite) built on libc, and `route` (`ip route`-lite
+over rtnetlink). Packet capture stays
 with the sibling project lmshark (Wireshark/tcpdump territory); URL fetching
 will be lmcurl.
 
@@ -36,16 +37,19 @@ lmnet tracepath HOST [iputils tracepath options]
 lmnet dns HOST                                # resolve addresses (nslookup-lite)
 lmnet dig NAME [TYPE] [@server]               # DNS query as JSON (dig-lite)
 lmnet ifaddrs                                 # interfaces + addresses as JSON (ip addr-lite)
+lmnet route                                   # routing tables as JSON (ip route-lite)
 lmnet --dsl FILE [FILE ...]
 ```
 
 `ping` and `tracepath` are the upstream iputils binaries-in-a-binary: same
 flags, same output, same behavior (including the usual raw-socket permission
-requirements). `dns` and `ifaddrs` are structured and print one JSON array;
-`dig` sends a real RFC 1035 query (UDP, 3 s timeout, connected socket so a
-dead resolver fails fast) and prints one JSON object
+requirements). `dns`, `ifaddrs`, and `route` are structured and print one JSON
+array; `dig` sends a real RFC 1035 query (UDP, 3 s timeout, connected socket
+so a dead resolver fails fast) and prints one JSON object
 `{"rcode": ..., "answers": [{name, type, ttl, data}]}` — try
-`lmnet dig example.com A @1.1.1.1`.
+`lmnet dig example.com A @1.1.1.1`. `route` dumps every kernel routing table
+over rtnetlink (IPv4 + IPv6, `ip route show table all`-style) as
+`[{dest, via, dev, proto, scope, metric, table, prefsrc}]`.
 
 ## Scripting
 
@@ -82,7 +86,8 @@ Windows port upstream to wrap.
 
 ## Roadmap
 
-- `ip` (`addr`/`link`/`route` via netlink, iproute2 sources)
+- `ip` — `route` delivered over rtnetlink as `lmnet route` / `net.routes`
+  (`addr` already covered by `ifaddrs`); `link` remains (iproute2 sources)
 - `traceroute`/`mtr` (structured hop lists through the DSL)
 - `netstat`/`lsof` (socket tables from /proc)
 - `dig`/`nslookup` (full DNS messages, not just addresses) — delivered as
