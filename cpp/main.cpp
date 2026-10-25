@@ -4,11 +4,13 @@
 #include "dns.hpp"
 #include "sockets.hpp"
 #include "route.hpp"
+#include "trace.hpp"
 #include "dslvm.hpp"
 #include "schema_embedded.hpp"
 
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -30,6 +32,8 @@ struct Host {
   std::vector<std::unique_ptr<std::vector<lmnet::Route *>>> route_lists;
   std::vector<std::unique_ptr<lmnet::DnsResult>> dns_results;
   std::vector<std::unique_ptr<std::vector<lmnet::DnsAnswer *>>> dns_answer_lists;
+  std::vector<std::unique_ptr<lmnet::TraceResult>> traces;
+  std::vector<std::unique_ptr<std::vector<lmnet::Hop *>>> hop_lists;
   template <class T>
   Value hold(std::vector<std::unique_ptr<T>> &arena, const char *type, T value) {
     if (arena.size() >= 65536)
@@ -57,6 +61,18 @@ lmnet::DnsAnswer *dns_answer_of(void *p, const char *who) {
   auto *a = self<lmnet::DnsAnswer>(p);
   if (!a) throw dslvm::Error(std::string(who) + ": stale DnsAnswer handle");
   return a;
+}
+
+lmnet::TraceResult *trace_result_of(void *p, const char *who) {
+  auto *r = self<lmnet::TraceResult>(p);
+  if (!r) throw dslvm::Error(std::string(who) + ": stale TraceResult handle");
+  return r;
+}
+
+lmnet::Hop *hop_of(void *p, const char *who) {
+  auto *h = self<lmnet::Hop>(p);
+  if (!h) throw dslvm::Error(std::string(who) + ": stale Hop handle");
+  return h;
 }
 
 std::string json_escape(const std::string &s) {
@@ -113,6 +129,15 @@ std::string route_json(const lmnet::Route &r) {
          ",\"metric\":" + std::to_string(r.metric) +
          ",\"table\":" + json_string(r.table) +
          ",\"prefsrc\":" + json_string(r.prefsrc) + "}";
+}
+
+std::string hop_json(const lmnet::Hop &h) {
+  char rtt[32];
+  std::snprintf(rtt, sizeof rtt, "%.3f", h.rtt_ms);
+  return std::string("{\"ttl\":") + std::to_string(h.ttl) +
+         ",\"from\":" + json_string(h.from) +
+         ",\"rtt_ms\":" + rtt +
+         ",\"reached\":" + (h.reached ? "true" : "false") + "}";
 }
 
 // ---- DSL registry: the schema implementation ----
@@ -303,6 +328,59 @@ void register_host(dslvm::Registry &reg, Host &host) {
       throw dslvm::Error("DnsAnswerList.at index out of range");
     return Value::object("DnsAnswer", v->at(static_cast<size_t>(i)));
   });
+
+  // Like dig, a failed trace is data (error() carries the message), so
+  // scripts can branch on it without a VM exception.
+  reg.method("Net", "trace", {"string", "int"}, "TraceResult", [&host](void *, Args &args) {
+    auto result = lmnet::trace_udp(args[0].s, args[1].i, 1000, args[1].i);
+    // Hold the result first: the hop list points into it.
+    Value res = host.hold(host.traces, "TraceResult", std::move(result));
+    auto *held = self<lmnet::TraceResult>(res.obj);
+    std::vector<lmnet::Hop *> ptrs;
+    ptrs.reserve(held->hops.size());
+    for (auto &hop : held->hops)
+      ptrs.push_back(&hop);
+    host.hold(host.hop_lists, "HopList", std::move(ptrs));
+    return res;
+  });
+
+  reg.method("TraceResult", "dest_ip", {}, "string", [](void *s, Args &) {
+    return Value::string(trace_result_of(s, "dest_ip")->dest_ip);
+  });
+  reg.method("TraceResult", "error", {}, "string", [](void *s, Args &) {
+    return Value::string(trace_result_of(s, "error")->error);
+  });
+  reg.method("TraceResult", "hops", {}, "HopList", [&host](void *s, Args &) {
+    auto *result = trace_result_of(s, "hops");
+    std::vector<lmnet::Hop *> ptrs;
+    ptrs.reserve(result->hops.size());
+    for (auto &hop : result->hops)
+      ptrs.push_back(&hop);
+    return host.hold(host.hop_lists, "HopList", std::move(ptrs));
+  });
+
+  reg.method("Hop", "ttl", {}, "int", [](void *s, Args &) {
+    return Value::integer(hop_of(s, "ttl")->ttl);
+  });
+  reg.method("Hop", "from", {}, "string", [](void *s, Args &) {
+    return Value::string(hop_of(s, "from")->from);
+  });
+  reg.method("Hop", "rtt_ms", {}, "float", [](void *s, Args &) {
+    return Value::real(hop_of(s, "rtt_ms")->rtt_ms);
+  });
+  reg.method("Hop", "reached", {}, "bool", [](void *s, Args &) {
+    return Value::boolean(hop_of(s, "reached")->reached);
+  });
+  reg.method("HopList", "len", {}, "int", [](void *s, Args &) {
+    return Value::integer(static_cast<int64_t>(self<std::vector<lmnet::Hop *>>(s)->size()));
+  });
+  reg.method("HopList", "at", {"int"}, "Hop", [](void *s, Args &args) {
+    const auto *v = self<std::vector<lmnet::Hop *>>(s);
+    const int64_t i = args[0].i;
+    if (i < 0 || static_cast<size_t>(i) >= v->size())
+      throw dslvm::Error("HopList.at index out of range");
+    return Value::object("Hop", v->at(static_cast<size_t>(i)));
+  });
 }
 
 void print_schema_summary(const dslvm::Registry &reg) {
@@ -338,6 +416,7 @@ int main(int argc, char **argv) {
       "       lmnet ifaddrs         # interfaces with addresses (ip addr-lite)\n"
       "       lmnet route           # routing tables as JSON (ip route-lite)\n"
       "       lmnet sockets [tcp|udp|unix] [--listen]  # socket tables (netstat/lsof -i-lite)\n"
+      "       lmnet trace HOST [maxttl]  # UDP-probe traceroute as JSON (traceroute-lite)\n"
       "       lmnet --dsl FILE [FILE ...]\n";
   if (argc == 2 && std::string(argv[1]) == "--version") {
     std::cout << "lmnet " LMNET_VERSION "\n";
@@ -475,6 +554,33 @@ int main(int argc, char **argv) {
       std::cout << route_json(routes[i]);
     }
     std::cout << "]\n";
+    return std::cout ? 0 : 4;
+  }
+  if (argc >= 3 && std::string(argv[1]) == "trace") {
+    if (argc > 4) {
+      std::cerr << usage;
+      return 2;
+    }
+    int64_t max_ttl = 30;
+    if (argc == 4) {
+      char *end = nullptr;
+      max_ttl = std::strtoll(argv[3], &end, 10);
+      if (!end || *end != '\0' || max_ttl < 1 || max_ttl > 255) {
+        std::cerr << usage;
+        return 2;
+      }
+    }
+    auto result = lmnet::trace_udp(argv[2], max_ttl, 1000, max_ttl);
+    if (!result.error.empty()) {
+      std::cerr << "lmnet trace: " << argv[2] << ": " << result.error << "\n";
+      return 1;
+    }
+    std::cout << "{\"dest_ip\":" << json_string(result.dest_ip) << ",\"hops\":[";
+    for (size_t i = 0; i < result.hops.size(); ++i) {
+      if (i) std::cout << ",";
+      std::cout << hop_json(result.hops[i]);
+    }
+    std::cout << "]}\n";
     return std::cout ? 0 : 4;
   }
   if (argc >= 3 && std::string(argv[1]) == "--dsl") {

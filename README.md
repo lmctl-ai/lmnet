@@ -10,8 +10,9 @@ The long-term goal is to combine the common Linux network toolbox (`ping`,
 `nslookup`, `iftop`, `iperf3`) behind one CLI and one scripting surface.
 Today lmnet ships the first slice: the iputils `ping` and `tracepath`
 engines, plus `dns` (nslookup-lite), `dig` (dig-lite: real DNS messages over
-UDP), `ifaddrs` (`ip addr`-lite) built on libc, and `route` (`ip route`-lite
-over rtnetlink). Packet capture stays
+UDP), `ifaddrs` (`ip addr`-lite) built on libc, `route` (`ip route`-lite
+over rtnetlink), and `trace` (traceroute-lite: UDP probes, ICMP answers,
+structured hop list). Packet capture stays
 with the sibling project lmshark (Wireshark/tcpdump territory); URL fetching
 will be lmcurl.
 
@@ -38,6 +39,7 @@ lmnet dns HOST                                # resolve addresses (nslookup-lite
 lmnet dig NAME [TYPE] [@server]               # DNS query as JSON (dig-lite)
 lmnet ifaddrs                                 # interfaces + addresses as JSON (ip addr-lite)
 lmnet route                                   # routing tables as JSON (ip route-lite)
+lmnet trace HOST [maxttl]                     # UDP-probe traceroute as JSON (traceroute-lite)
 lmnet --dsl FILE [FILE ...]
 ```
 
@@ -49,7 +51,14 @@ so a dead resolver fails fast) and prints one JSON object
 `{"rcode": ..., "answers": [{name, type, ttl, data}]}` — try
 `lmnet dig example.com A @1.1.1.1`. `route` dumps every kernel routing table
 over rtnetlink (IPv4 + IPv6, `ip route show table all`-style) as
-`[{dest, via, dev, proto, scope, metric, table, prefsrc}]`.
+`[{dest, via, dev, proto, scope, metric, table, prefsrc}]`. `trace` is a
+structured traceroute-lite: one UDP probe per TTL to a high unprivileged port
+(33434+ttl), ICMP answers on a raw socket, printed as
+`{"dest_ip": ..., "hops": [{ttl, from, rtt_ms, reached}]}` — a silent hop is
+`{"from": "", "rtt_ms": -1}` and `reached` marks the destination answering
+port-unreachable. IPv4-only in this slice (IPv6-only names fail cleanly), and
+reading ICMP needs root or CAP_NET_RAW. Unlike the vendored `tracepath`,
+`trace` is structured data: every hop is a DSL object via `net.trace`.
 
 ## Scripting
 
@@ -88,7 +97,9 @@ Windows port upstream to wrap.
 
 - `ip` — `route` delivered over rtnetlink as `lmnet route` / `net.routes`
   (`addr` already covered by `ifaddrs`); `link` remains (iproute2 sources)
-- `traceroute`/`mtr` (structured hop lists through the DSL)
+- `traceroute`/`mtr` — traceroute-lite delivered over UDP/ICMP as
+  `lmnet trace` / `net.trace` (IPv4, one probe per TTL); mtr-style repeated
+  probes remain
 - `netstat`/`lsof` (socket tables from /proc)
 - `dig`/`nslookup` (full DNS messages, not just addresses) — delivered as
   dig-lite: `lmnet dig` + `net.dns_query` (nslookup-style name resolution

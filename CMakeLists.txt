@@ -57,6 +57,7 @@ add_executable(lmnet
   cpp/dns.cpp
   cpp/sockets.cpp
   cpp/route.cpp
+  cpp/trace.cpp
   ${IPUTILS_SOURCES}
   "${GENERATED_SCHEMA}"
 )

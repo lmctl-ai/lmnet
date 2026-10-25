@@ -42,6 +42,15 @@
             ],
             "returns": "SocketList"
           }
+        ],
+        "trace": [
+          {
+            "params": [
+              "string",
+              "int"
+            ],
+            "returns": "TraceResult"
+          }
         ]
       }
     },
@@ -289,6 +298,74 @@
               "int"
             ],
             "returns": "Socket"
+          }
+        ]
+      }
+    },
+    "TraceResult": {
+      "methods": {
+        "dest_ip": [
+          {
+            "params": [],
+            "returns": "string"
+          }
+        ],
+        "error": [
+          {
+            "params": [],
+            "returns": "string"
+          }
+        ],
+        "hops": [
+          {
+            "params": [],
+            "returns": "HopList"
+          }
+        ]
+      }
+    },
+    "Hop": {
+      "methods": {
+        "ttl": [
+          {
+            "params": [],
+            "returns": "int"
+          }
+        ],
+        "from": [
+          {
+            "params": [],
+            "returns": "string"
+          }
+        ],
+        "rtt_ms": [
+          {
+            "params": [],
+            "returns": "float"
+          }
+        ],
+        "reached": [
+          {
+            "params": [],
+            "returns": "bool"
+          }
+        ]
+      }
+    },
+    "HopList": {
+      "methods": {
+        "len": [
+          {
+            "params": [],
+            "returns": "int"
+          }
+        ],
+        "at": [
+          {
+            "params": [
+              "int"
+            ],
+            "returns": "Hop"
           }
         ]
       }

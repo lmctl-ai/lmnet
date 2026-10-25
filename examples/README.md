@@ -13,5 +13,7 @@ host CLI the same way lmscript resolves any other tool.
 
 - `dns-lookup.lms` — resolve `localhost` and print every address
 - `interfaces.lms` — enumerate interfaces, addresses, MTUs and flags
+- `trace.lms` — traceroute 127.0.0.1 and print the hop list (degrades to an
+  error message without raw-socket permission)
 
 `./test.sh` compiles and runs every example as part of the check suite.

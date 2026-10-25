@@ -277,6 +277,74 @@ set +e; out="$("$HOST" --dsl "$WORK/routeoob.dslb" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "RouteList.at bounds (exit $code): $out"
 ok "RouteList.at out of range refused (exit 3)"
 
+# --- trace subcommand (UDP probes + ICMP answers; needs CAP_NET_RAW, skip without) ---
+set +e; out="$("$HOST" trace 127.0.0.1 2>&1)"; code=$?; set -e
+TRACE_RAW=0
+if [ "$code" = 0 ]; then
+  TRACE_RAW=1
+  echo "$out" | python3 -c "
+import json,sys
+r=json.load(sys.stdin)  # strict: must be valid JSON
+assert r['dest_ip']=='127.0.0.1', r
+assert len(r['hops'])==1, r  # loopback: the ttl=1 probe already reaches
+h=r['hops'][0]
+assert h['ttl']==1 and h['from']=='127.0.0.1' and h['reached'] is True, r
+assert h['rtt_ms']>=0, r
+print('trace 127.0.0.1: 1 hop, reached, rtt %.3f ms' % h['rtt_ms'])
+"
+  ok "trace 127.0.0.1: loopback reached on hop 1"
+elif echo "$out" | grep -qi 'CAP_NET_RAW\|operation not permitted\|permission denied'; then
+  echo "ok $((++pass)) - trace skipped: no raw-socket permission in this environment"
+else
+  fail "trace 127.0.0.1 failed (exit $code): $out"
+fi
+
+set +e; "$HOST" trace nonexistent.invalid-lmnet-test. >/dev/null 2>"$WORK/trace.err"; code=$?; set -e
+[ "$code" = 1 ] || fail "trace unresolvable host exits 1 (got $code)"
+grep -qi 'nonexistent.invalid-lmnet-test' "$WORK/trace.err" || \
+  fail "trace error names the host: $(cat "$WORK/trace.err")"
+ok "trace failure exits 1 naming the host"
+
+# Failed traces are data in the DSL (error() carries the message), so the same
+# bytecode runs cleanly with and without raw-socket permission.
+cat > "$WORK/trace.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+let r = net.trace("127.0.0.1", 8);
+if (r.error() != "") {
+  println("trace unavailable: " + r.error());
+} else {
+  println("dest: " + r.dest_ip());
+  println("hops: " + str(r.hops().len()));
+  println("reached: " + str(r.hops().at(0).reached()));
+}
+end _dsl_
+savedsl(p, "$WORK/trace.dslb");
+EOF
+"$LMSCRIPT" "$WORK/trace.lms" "$WORK/trace.dslb" >/dev/null || fail "trace compile"
+out="$("$HOST" --dsl "$WORK/trace.dslb")"
+if [ "$TRACE_RAW" = 1 ]; then
+  grep -q '^dest: 127\.0\.0\.1$' <<<"$out" || fail "trace bytecode dest: $out"
+  grep -q '^hops: 1$' <<<"$out" || fail "trace bytecode hops: $out"
+  grep -q '^reached: true$' <<<"$out" || fail "trace bytecode reached: $out"
+  ok "bytecode: net.trace through the DSL"
+else
+  grep -q '^trace unavailable:' <<<"$out" || fail "trace bytecode error branch: $out"
+  echo "ok $((++pass)) - bytecode trace skipped: no raw-socket permission (error branch verified)"
+fi
+
+# Bounds refusal needs no socket: a permission failure yields an empty hop
+# list, so at(999) is still out of range everywhere.
+cat > "$WORK/traceoob.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+net.trace("127.0.0.1", 8).hops().at(999);
+end _dsl_
+savedsl(p, "$WORK/traceoob.dslb");
+EOF
+"$LMSCRIPT" "$WORK/traceoob.lms" "$WORK/traceoob.dslb" >/dev/null || fail "compile"
+set +e; out="$("$HOST" --dsl "$WORK/traceoob.dslb" 2>&1)"; code=$?; set -e
+[ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "HopList.at bounds (exit $code): $out"
+ok "HopList.at out of range refused (exit 3)"
+
 # --- DSL bytecode ---
 cat > "$WORK/smoke.lms" <<EOF
 p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
@@ -326,7 +394,7 @@ ok "multiple bytecode files run sequentially"
 
 # --- examples compile and run ---
 mkdir -p build
-for f in dns-lookup dns-query interfaces routes sockets; do
+for f in dns-lookup dns-query interfaces routes sockets trace; do
   [ -f "examples/$f.lms" ] || continue
   "$LMSCRIPT" "examples/$f.lms" "build/$f.dslb" >"$WORK/$f.compile.log" 2>&1 || fail "$f example compile"
   "$HOST" --dsl "build/$f.dslb" >"$WORK/$f.out" || fail "$f example run"
