@@ -1,0 +1,9 @@
+# Build output
+/build*/
+
+# Vendored upstream sources (pinned by *.lock, synced by scripts/sync-*.sh)
+/third_party/
+
+# Editor/OS noise
+*.swp
+.DS_Store

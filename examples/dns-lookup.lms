@@ -1,0 +1,18 @@
+# Chapter: Basics - DNS lookup
+# Shows: net.dns_lookup, std StrList len/at, the loopback resolution
+# Run: lmscript examples/dns-lookup.lms      (then: lmnet --dsl build/dns-lookup.dslb)
+# Needs: nothing special; localhost resolves via the hosts database offline.
+# exit: 0
+# expect:
+#|resolving localhost
+#|  #1 127.0.0.1
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+
+println("resolving localhost");
+let addrs = net.dns_lookup("localhost");
+for (i in range(0, addrs.len())) {
+  println("  #" + str(i + 1) + " " + addrs.at(i));
+}
+
+end _dsl_
+savedsl(p, "build/dns-lookup.dslb");

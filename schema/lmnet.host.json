@@ -1,0 +1,33 @@
+{
+  "dsl.schema": 2,
+  "name": "lmnet",
+  "types": {
+    "Net": {
+      "methods": {
+        "dns_lookup": [{"params": ["string"], "returns": "StrList"}],
+        "interfaces": [{"params": [], "returns": "IfaceList"}]
+      }
+    },
+    "Iface": {
+      "methods": {
+        "name": [{"params": [], "returns": "string"}],
+        "addr": [{"params": [], "returns": "string"}],
+        "mtu": [{"params": [], "returns": "int"}],
+        "up": [{"params": [], "returns": "bool"}],
+        "loopback": [{"params": [], "returns": "bool"}]
+      }
+    },
+    "IfaceList": {
+      "methods": {
+        "len": [{"params": [], "returns": "int"}],
+        "at": [{"params": ["int"], "returns": "Iface"}]
+      }
+    }
+  },
+  "functions": {
+    "println": [{"params": ["string"], "returns": "void"}]
+  },
+  "context": {
+    "net": "Net"
+  }
+}

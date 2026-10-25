@@ -1,0 +1,24 @@
+# Chapter: Basics - list network interfaces
+# Shows: net.interfaces, Iface.name/addr/mtu/up/loopback, IfaceList len/at
+# Run: lmscript examples/interfaces.lms      (then: lmnet --dsl build/interfaces.dslb)
+# Needs: nothing (offline); every POSIX host has at least the loopback iface.
+# exit: 0
+# expect:
+#|interfaces:
+#|found the loopback interface
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+
+println("interfaces:");
+let ifs = net.interfaces();
+let found_lo = false;
+for (i in range(0, ifs.len())) {
+  let f = ifs.at(i);
+  let state = "down";
+  if (f.up()) { state = "up"; }
+  println("  " + f.name() + " " + f.addr() + " mtu=" + str(f.mtu()) + " " + state);
+  if (f.loopback()) { found_lo = true; }
+}
+if (found_lo) { println("found the loopback interface"); }
+
+end _dsl_
+savedsl(p, "build/interfaces.dslb");
