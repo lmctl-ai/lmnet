@@ -33,6 +33,7 @@ struct Host {
   std::vector<std::unique_ptr<std::vector<lmnet::Iface *>>> iface_lists;
   std::vector<std::unique_ptr<lmnet::Socket>> sockets;
   std::vector<std::unique_ptr<std::vector<lmnet::Socket *>>> socket_lists;
+  std::vector<std::unique_ptr<lmnet::SocketSummary>> socket_summaries;
   std::vector<std::unique_ptr<lmnet::Route>> routes;
   std::vector<std::unique_ptr<std::vector<lmnet::Route *>>> route_lists;
   std::vector<std::unique_ptr<lmnet::Neighbor>> neighbors;
@@ -112,6 +113,12 @@ lmnet::Rule *rule_of(void *p, const char *who) {
   return r;
 }
 
+lmnet::SocketSummary *socket_summary_of(void *p, const char *who) {
+  auto *s = self<lmnet::SocketSummary>(p);
+  if (!s) throw dslvm::Error(std::string(who) + ": stale SocketSummary handle");
+  return s;
+}
+
 std::string json_escape(const std::string &s) {
   std::string out;
   for (unsigned char c : s) {
@@ -148,6 +155,26 @@ std::string socket_json(const lmnet::Socket &s) {
          ",\"state\":" + json_string(s.state) +
          ",\"pid\":" + std::to_string(s.pid) +
          ",\"process\":" + json_string(s.process) + "}";
+}
+
+// ss -s-lite: {"total":N,"tcp":N,"tcp6":N,"udp":N,"udp6":N,"unix":N,
+// "tcp_states":{...},"listening":N}; tcp_states lists only states that occur.
+std::string socket_summary_json(const lmnet::SocketSummary &s) {
+  std::string out = std::string("{\"total\":") + std::to_string(s.total) +
+                    ",\"tcp\":" + std::to_string(s.tcp) +
+                    ",\"tcp6\":" + std::to_string(s.tcp6) +
+                    ",\"udp\":" + std::to_string(s.udp) +
+                    ",\"udp6\":" + std::to_string(s.udp6) +
+                    ",\"unix\":" + std::to_string(s.unix) +
+                    ",\"tcp_states\":{";
+  bool first = true;
+  for (const auto &entry : s.tcp_states) {
+    if (!first) out += ",";
+    first = false;
+    out += json_string(entry.first) + ":" + std::to_string(entry.second);
+  }
+  out += "},\"listening\":" + std::to_string(s.listening) + "}";
+  return out;
 }
 
 std::string dns_answer_json(const lmnet::DnsAnswer &a) {
@@ -310,6 +337,41 @@ void register_host(dslvm::Registry &reg, Host &host) {
     if (i < 0 || static_cast<size_t>(i) >= v->size())
       throw dslvm::Error("SocketList.at index out of range");
     return Value::object("Socket", v->at(static_cast<size_t>(i)));
+  });
+
+  reg.method("Net", "socket_summary", {"string"}, "SocketSummary", [&host](void *, Args &args) {
+    std::string error;
+    auto summary = lmnet::socket_summary(args[0].s, error);
+    if (!error.empty())
+      throw dslvm::Error("socket_summary: " + error);
+    return host.hold(host.socket_summaries, "SocketSummary", std::move(summary));
+  });
+
+  reg.method("SocketSummary", "total", {}, "int", [](void *s, Args &) {
+    return Value::integer(socket_summary_of(s, "total")->total);
+  });
+  reg.method("SocketSummary", "listening", {}, "int", [](void *s, Args &) {
+    return Value::integer(socket_summary_of(s, "listening")->listening);
+  });
+  reg.method("SocketSummary", "tcp", {}, "int", [](void *s, Args &) {
+    return Value::integer(socket_summary_of(s, "tcp")->tcp);
+  });
+  reg.method("SocketSummary", "tcp6", {}, "int", [](void *s, Args &) {
+    return Value::integer(socket_summary_of(s, "tcp6")->tcp6);
+  });
+  reg.method("SocketSummary", "udp", {}, "int", [](void *s, Args &) {
+    return Value::integer(socket_summary_of(s, "udp")->udp);
+  });
+  reg.method("SocketSummary", "udp6", {}, "int", [](void *s, Args &) {
+    return Value::integer(socket_summary_of(s, "udp6")->udp6);
+  });
+  reg.method("SocketSummary", "unix", {}, "int", [](void *s, Args &) {
+    return Value::integer(socket_summary_of(s, "unix")->unix);
+  });
+  reg.method("SocketSummary", "state_count", {"string"}, "int", [](void *s, Args &args) {
+    const auto *summary = socket_summary_of(s, "state_count");
+    const auto it = summary->tcp_states.find(args[0].s);
+    return Value::integer(it == summary->tcp_states.end() ? 0 : it->second);
   });
 
   reg.method("Net", "routes", {}, "RouteList", [&host](void *, Args &) {
@@ -687,7 +749,7 @@ int main(int argc, char **argv) {
       "       lmnet neigh           # neighbor table as JSON (ip neigh-lite)\n"
       "       lmnet link            # link devices + RX/TX counters as JSON (ip -s link-lite)\n"
       "       lmnet counters        # kernel networking counters as JSON (netstat -s/nstat-lite)\n"
-      "       lmnet sockets [tcp|udp|unix] [--listen]  # socket tables (netstat/lsof -i-lite)\n"
+      "       lmnet sockets [tcp|udp|unix] [--listen] [--summary]  # socket tables (netstat/lsof -i-lite, ss -s-lite)\n"
       "       lmnet trace HOST [maxttl]  # UDP-probe traceroute as JSON (traceroute-lite)\n"
       "       lmnet iperf3 [iperf3 options]   # the real iperf3 engine (client/server)\n"
       "       lmnet --dsl FILE [FILE ...]\n";
@@ -791,10 +853,13 @@ int main(int argc, char **argv) {
   if (argc >= 2 && std::string(argv[1]) == "sockets") {
     std::string proto_filter;
     bool only_listen = false;
+    bool summary = false;
     for (int i = 2; i < argc; ++i) {
       const std::string arg = argv[i];
       if (arg == "--listen")
         only_listen = true;
+      else if (arg == "--summary")
+        summary = true;
       else if (arg == "tcp" || arg == "udp" || arg == "unix")
         proto_filter = arg;
       else {
@@ -803,6 +868,15 @@ int main(int argc, char **argv) {
       }
     }
     std::string error;
+    if (summary) {
+      auto s = lmnet::socket_summary(proto_filter, error);
+      if (!error.empty()) {
+        std::cerr << "lmnet sockets: " << error << "\n";
+        return 1;
+      }
+      std::cout << socket_summary_json(s) << "\n";
+      return std::cout ? 0 : 4;
+    }
     auto socks = lmnet::socket_table(proto_filter, only_listen, error);
     if (!error.empty()) {
       std::cerr << "lmnet sockets: " << error << "\n";

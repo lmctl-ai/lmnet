@@ -49,7 +49,7 @@ lmnet rule                                    # policy routing rules as JSON (ip
 lmnet neigh                                   # neighbor table as JSON (ip neigh-lite)
 lmnet link                                    # link devices + RX/TX counters as JSON (ip -s link-lite)
 lmnet counters                                # kernel networking counters as JSON (netstat -s/nstat-lite)
-lmnet sockets [tcp|udp|unix] [--listen]       # socket tables as JSON (netstat/lsof -i-lite)
+lmnet sockets [tcp|udp|unix] [--listen] [--summary]  # socket tables as JSON (netstat/lsof -i-lite, ss -s-lite)
 lmnet trace HOST [maxttl]                     # UDP-probe traceroute as JSON (traceroute-lite)
 lmnet --dsl FILE [FILE ...]
 ```
@@ -97,6 +97,16 @@ without IPv6) is skipped silently — only a totally unreadable `/proc` fails
 limit" convention). In the DSL the same data is a `CounterList` of
 `Counter{name, value}` pairs via `net.counters`, mirroring how route JSON and
 `RouteList` are two views of one dump.
+`sockets` dumps the socket tables from `/proc/net/{tcp,tcp6,udp,udp6,unix}`
+(`netstat`/`lsof -i`-lite) as one JSON array of
+`{proto, local, remote, state, pid, process}` rows, with a `[tcp|udp|unix]`
+proto filter, a `--listen` view, and process attribution via
+/proc/<pid>/fd; `--summary` prints the `ss -s`-lite aggregate instead —
+one JSON object `{total, tcp, tcp6, udp, udp6, unix, tcp_states, listening}`
+where `tcp_states` maps each kernel TCP state name that occurs to its count
+(per-family counts sum to `total`). In the DSL the table is a `SocketList`
+via `net.sockets` and the aggregate a `SocketSummary` via
+`net.socket_summary`.
 `trace` is a
 structured traceroute-lite: one UDP probe per TTL to a high unprivileged port
 (33434+ttl), ICMP answers on a raw socket, printed as
@@ -150,7 +160,8 @@ Windows port upstream to wrap.
   probes remain
 - `netstat`/`lsof` (socket tables from /proc) — delivered as `lmnet
   sockets` / `net.sockets` (tcp/udp/unix tables, LISTEN view, process
-  attribution via /proc/<pid>/fd)
+  attribution via /proc/<pid>/fd); the `ss -s`-style aggregate is delivered
+  as `lmnet sockets --summary` / `net.socket_summary`
 - `netstat -s`/`nstat` (kernel protocol counters from /proc/net) —
   delivered as `lmnet counters` / `net.counters` (snmp/netstat/snmp6
   coverage, nstat-style `Section.Field` key names)

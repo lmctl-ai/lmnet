@@ -19,6 +19,9 @@ host CLI the same way lmscript resolves any other tool.
   `interfaces`, this covers link devices with no addresses too)
 - `neigh.lms` — dump the ARP/NDP neighbor table (prints an empty table
   cleanly on a fresh machine)
+- `sockets-summary.lms` — print the `ss -s`-lite socket aggregate (per-family
+  counts and TCP state histogram; counts vary by host, so only the framing
+  lines are pinned)
 - `rule.lms` — dump the policy routing rules (ip rule-lite; the pref-0
   local rule always exists, so its line is pinned)
 - `trace.lms` — traceroute 127.0.0.1 and print the hop list (degrades to an

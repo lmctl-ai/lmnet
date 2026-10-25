@@ -1,0 +1,23 @@
+# Chapter: Basics - socket summary
+# Shows: net.socket_summary, SocketSummary.total/listening/tcp*/udp*/unix/state_count
+# Run: lmscript examples/sockets-summary.lms      (then: lmnet --dsl build/sockets-summary.dslb)
+# Needs: nothing (offline); counts vary by host, so only the framing lines are pinned.
+# exit: 0
+# expect:
+#|socket summary:
+#|at least one listener
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+
+let s = net.socket_summary("");
+println("socket summary:");
+println("  total: " + str(s.total()));
+println("  listening: " + str(s.listening()));
+println("  tcp listen: " + str(s.state_count("LISTEN")));
+if (s.listening() > 0) {
+  println("at least one listener");
+} else {
+  println("no listeners found");
+}
+
+end _dsl_
+savedsl(p, "build/sockets-summary.dslb");

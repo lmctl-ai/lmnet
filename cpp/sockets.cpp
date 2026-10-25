@@ -225,4 +225,24 @@ std::vector<Socket> socket_table(const std::string &proto_filter,
   return out;
 }
 
+SocketSummary socket_summary(const std::string &proto_filter, std::string &error) {
+  error.clear();
+  SocketSummary summary;
+  const auto table = socket_table(proto_filter, false, error);
+  if (!error.empty())
+    return summary;
+  summary.total = static_cast<int64_t>(table.size());
+  for (const auto &sock : table) {
+    if (sock.proto == "tcp") ++summary.tcp;
+    else if (sock.proto == "tcp6") ++summary.tcp6;
+    else if (sock.proto == "udp") ++summary.udp;
+    else if (sock.proto == "udp6") ++summary.udp6;
+    else if (sock.proto == "unix") ++summary.unix;
+    if (sock.state == "LISTEN") ++summary.listening;
+    if (sock.proto == "tcp" || sock.proto == "tcp6")
+      ++summary.tcp_states[sock.state];
+  }
+  return summary;
+}
+
 } // namespace lmnet

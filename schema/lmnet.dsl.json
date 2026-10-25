@@ -12,6 +12,7 @@
         "neighbors": [{"params": [], "returns": "NeighborList"}],
         "rules": [{"params": [], "returns": "RuleList"}],
         "routes": [{"params": [], "returns": "RouteList"}],
+        "socket_summary": [{"params": ["string"], "returns": "SocketSummary"}],
         "sockets": [{"params": ["string", "bool"], "returns": "SocketList"}],
         "trace": [{"params": ["string", "int"], "returns": "TraceResult"}]
       }
@@ -152,6 +153,18 @@
         "state": [{"params": [], "returns": "string"}],
         "pid": [{"params": [], "returns": "int"}],
         "process": [{"params": [], "returns": "string"}]
+      }
+    },
+    "SocketSummary": {
+      "methods": {
+        "total": [{"params": [], "returns": "int"}],
+        "listening": [{"params": [], "returns": "int"}],
+        "tcp": [{"params": [], "returns": "int"}],
+        "tcp6": [{"params": [], "returns": "int"}],
+        "udp": [{"params": [], "returns": "int"}],
+        "udp6": [{"params": [], "returns": "int"}],
+        "unix": [{"params": [], "returns": "int"}],
+        "state_count": [{"params": ["string"], "returns": "int"}]
       }
     },
     "SocketList": {

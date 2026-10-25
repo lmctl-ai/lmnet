@@ -275,6 +275,75 @@ out="$("$HOST" --dsl "$WORK/socks.dslb")"
 grep -q '^tcp listeners: [1-9]' <<<"$out" || fail "sockets bytecode: $out"
 ok "bytecode: net.sockets through the DSL"
 
+# --- socket summary (ss -s-lite) ---
+# The table tests above rely on ambient listeners; the summary asserts real
+# counts, so pin one deterministic TCP listener on a fixed loopback port
+# (15354; the fake DNS server owns 15353).
+cat > "$WORK/socksum-server.py" <<'PY'
+import socket, sys, time
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", 15354))
+s.listen(1)
+time.sleep(60)
+PY
+python3 "$WORK/socksum-server.py" &
+SUMMARY_SRV_PID=$!
+for _ in $(seq 1 25); do
+  if out="$("$HOST" sockets --summary 2>/dev/null)"; then break; fi
+  sleep 0.2
+done
+[ -n "$out" ] || fail "sockets --summary produced no output"
+SUM_OUT="$out" python3 - <<'PY'
+import json, os
+s = json.loads(os.environ["SUM_OUT"])  # strict: must be valid JSON
+assert isinstance(s["total"], int) and s["total"] >= 1, s
+assert s["tcp_states"].get("LISTEN", 0) >= 1, s
+assert s["tcp"] + s["tcp6"] + s["udp"] + s["udp6"] + s["unix"] <= s["total"], s
+assert s["listening"] >= 1, s
+for key in ("tcp", "tcp6", "udp", "udp6", "unix", "listening"):
+    assert isinstance(s[key], int) and s[key] >= 0, (key, s)
+assert isinstance(s["tcp_states"], dict), s
+print("sockets --summary:", s["total"], "sockets,",
+      s["listening"], "listening,", len(s["tcp_states"]), "tcp states")
+PY
+ok "sockets --summary: ss -s-style aggregate with LISTEN state"
+ALL_SUM="$out"
+
+out="$("$HOST" sockets tcp --summary)"
+TCP_SUM_OUT="$out" SUM_TOTAL="$ALL_SUM" python3 - <<'PY'
+import json, os
+s = json.loads(os.environ["TCP_SUM_OUT"])
+all_s = json.loads(os.environ["SUM_TOTAL"])
+assert s["total"] <= all_s["total"], (s, all_s)
+assert isinstance(s["tcp6"], int), s  # v6 still reported under a tcp filter
+assert s["unix"] == 0, s              # filter excludes unix from every count
+print("sockets tcp --summary:", s["total"], "of", all_s["total"], "sockets")
+PY
+ok "sockets tcp --summary: proto filter honored"
+
+cat > "$WORK/socksum.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+let s = net.socket_summary("");
+println("summary: total=" + str(s.total()) + " listen=" + str(s.listening()));
+end _dsl_
+savedsl(p, "$WORK/socksum.dslb");
+EOF
+"$LMSCRIPT" "$WORK/socksum.lms" "$WORK/socksum.dslb" >/dev/null || fail "socksum compile"
+out="$("$HOST" --dsl "$WORK/socksum.dslb")"
+SOCKSUM_OUT="$out" python3 - <<'PY'
+import os, re
+line = next((l for l in os.environ["SOCKSUM_OUT"].splitlines()
+             if re.match(r'^summary: total=[0-9]+ listen=[0-9]+$', l)), None)
+assert line is not None, os.environ["SOCKSUM_OUT"]
+listen = int(line.rsplit("listen=", 1)[1])
+assert listen >= 1, line
+print("socksum bytecode:", line)
+PY
+ok "bytecode: net.socket_summary through the DSL"
+kill "$SUMMARY_SRV_PID" 2>/dev/null || true
+SUMMARY_SRV_PID=""
+
 # --- route subcommand (rtnetlink dump, ip route-lite) ---
 out="$("$HOST" route)"
 ROUTE_OUT="$out" python3 - <<'PY'
@@ -622,7 +691,7 @@ ok "multiple bytecode files run sequentially"
 
 # --- examples compile and run ---
 mkdir -p build
-for f in counters dns-lookup dns-query interfaces link neigh routes rule sockets trace; do
+for f in counters dns-lookup dns-query interfaces link neigh routes rule sockets sockets-summary trace; do
   [ -f "examples/$f.lms" ] || continue
   "$LMSCRIPT" "examples/$f.lms" "build/$f.dslb" >"$WORK/$f.compile.log" 2>&1 || fail "$f example compile"
   "$HOST" --dsl "build/$f.dslb" >"$WORK/$f.out" || fail "$f example run"
