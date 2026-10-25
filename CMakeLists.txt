@@ -89,6 +89,7 @@ add_executable(lmnet
   cpp/counters.cpp
   cpp/trace.cpp
   cpp/scan.cpp
+  cpp/pipe.cpp
   ${IPUTILS_SOURCES}
   ${IPERF3_SOURCES}
   ${IPERF3_MAIN}

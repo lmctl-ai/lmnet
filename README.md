@@ -53,6 +53,7 @@ lmnet counters                                # kernel networking counters as JS
 lmnet sockets [tcp|udp|unix] [--listen] [--summary]  # socket tables as JSON (netstat/lsof -i-lite, ss -s-lite)
 lmnet trace HOST [maxttl]                     # UDP-probe traceroute as JSON (traceroute-lite)
 lmnet scan HOST [--ports SPEC] [--timeout MS] [--concurrency N]  # TCP connect port scanner as JSON (nmap-lite)
+lmnet pipe HOST PORT | --listen PORT [--forever]  # TCP stdio bridge (nc-lite)
 lmnet --dsl FILE [FILE ...]
 ```
 
@@ -143,6 +144,23 @@ timeout parameter. `net.check(host, port)` is the single-port boolean
 form — true only when the connect succeeds within the same fixed 750 ms,
 false on every network condition, and it never throws for network
 errors.
+`pipe` is a TCP stdio bridge (nc-lite): `lmnet pipe HOST PORT` connects
+and relays bytes between stdin and the socket and back (binary-safe raw
+byte I/O over a poll() loop with 64 KB buffers — large payloads stream;
+nothing is loaded whole). On stdin EOF it shutdown()s its write side so
+the peer sees EOF, then keeps draining the socket until the peer closes;
+it exits 0 when both directions finish cleanly and 1 naming the endpoint
+on resolution/connect failure. `lmnet pipe --listen PORT [--forever]`
+binds 0.0.0.0 (SO_REUSEADDR), accepts ONE connection, relays it, and
+exits — `--forever` loops back to accept the next one (service mode).
+TCP only: no UDP, no TLS, no Unix sockets, one connection at a time. In
+the DSL the same engine is blocking socket objects:
+`net.tcp_connect(host, port)` returns a `TcpConn{send, recv, close}` and
+`net.tcp_listen(port)` a `TcpListener{accept}`. `recv(n)` blocks until
+data arrives or EOF and returns up to n bytes ("" marks EOF); `close` is
+idempotent and later send/recv throw `TcpConn: closed`. Unlike
+`net.check`, connect/listen failures throw dslvm::Error so scripts see
+the message.
 
 ## Scripting
 

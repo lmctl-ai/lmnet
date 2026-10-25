@@ -1,0 +1,23 @@
+# Chapter: Basics - TCP stdio bridge (nc-lite)
+# Shows: net.tcp_connect/net.tcp_listen/net.tcp_accept socket objects
+#        (TcpConn send/recv/close, TcpListener accept) behind `lmnet pipe`
+# Run: lmscript examples/pipe.lms      (then: lmnet --dsl build/pipe.dslb)
+# Needs: nothing (offline); a live socket roundtrip needs a peer process,
+#        so this script only probes port 1 (closed on practically every
+#        machine — the verdict is data, not an error, so no assertion pins
+#        it) and prints how to drive the CLI bridge. A refused
+#        net.tcp_connect throws dslvm::Error and lmscript has no recover,
+#        so no connect attempt is made here.
+# exit: 0
+# expect:
+#|pipe example
+#|bridge: lmnet pipe HOST PORT  (or lmnet pipe --listen PORT [--forever])
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+
+println("pipe example");
+println("bridge: lmnet pipe HOST PORT  (or lmnet pipe --listen PORT [--forever])");
+println("port 1 reachable: " + str(net.check("127.0.0.1", 1)));
+println("objects: net.tcp_connect -> TcpConn{send,recv,close}; net.tcp_listen -> TcpListener{accept}");
+
+end _dsl_
+savedsl(p, "build/pipe.dslb");

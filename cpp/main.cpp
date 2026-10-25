@@ -10,6 +10,7 @@
 #include "counters.hpp"
 #include "trace.hpp"
 #include "scan.hpp"
+#include "pipe.hpp"
 #include "dslvm.hpp"
 #include "schema_embedded.hpp"
 
@@ -52,6 +53,8 @@ struct Host {
   std::vector<std::unique_ptr<lmnet::ScanResult>> scan_results;
   std::vector<std::unique_ptr<std::vector<lmnet::ScannedPort *>>> port_lists;
   std::vector<std::unique_ptr<lmnet::ScannedPort>> ports;
+  std::vector<std::unique_ptr<lmnet::TcpListener>> tcp_listeners;
+  std::vector<std::unique_ptr<lmnet::TcpConn>> tcp_conns;
   template <class T>
   Value hold(std::vector<std::unique_ptr<T>> &arena, const char *type, T value) {
     if (arena.size() >= 65536)
@@ -133,6 +136,18 @@ lmnet::ScannedPort *port_of(void *p, const char *who) {
   auto *sp = self<lmnet::ScannedPort>(p);
   if (!sp) throw dslvm::Error(std::string(who) + ": stale Port handle");
   return sp;
+}
+
+lmnet::TcpListener *tcp_listener_of(void *p, const char *who) {
+  auto *l = self<lmnet::TcpListener>(p);
+  if (!l) throw dslvm::Error(std::string(who) + ": stale TcpListener handle");
+  return l;
+}
+
+lmnet::TcpConn *tcp_conn_of(void *p, const char *who) {
+  auto *c = self<lmnet::TcpConn>(p);
+  if (!c) throw dslvm::Error(std::string(who) + ": stale TcpConn handle");
+  return c;
 }
 
 std::string json_escape(const std::string &s) {
@@ -817,6 +832,45 @@ void register_host(dslvm::Registry &reg, Host &host) {
       throw dslvm::Error("PortList.at index out of range");
     return Value::object("Port", v->at(static_cast<size_t>(i)));
   });
+
+  // Blocking socket objects for scripts. Unlike net.check (a boolean probe
+  // that never throws), connect/listen failures surface as dslvm::Error so
+  // scripts can see the message; send/recv/close on a closed TcpConn throw
+  // "TcpConn: closed".
+  const auto tcp_fail = [](const std::string &message) { throw dslvm::Error(message); };
+  reg.method("Net", "tcp_connect", {"string", "int"}, "TcpConn", [&host](void *, Args &args) {
+    std::string error;
+    const int fd =
+        lmnet::tcp_connect_fd(args[0].s, static_cast<int>(args[1].i), error);
+    if (fd < 0)
+      throw dslvm::Error("tcp_connect: " + error);
+    return host.hold(host.tcp_conns, "TcpConn", lmnet::TcpConn(fd));
+  });
+  reg.method("Net", "tcp_listen", {"int"}, "TcpListener", [&host](void *, Args &args) {
+    std::string error;
+    auto listener = lmnet::tcp_listen(static_cast<int>(args[0].i), error);
+    if (!listener.ok())
+      throw dslvm::Error("tcp_listen: " + error);
+    return host.hold(host.tcp_listeners, "TcpListener", std::move(listener));
+  });
+  reg.method("TcpListener", "accept", {}, "TcpConn", [&host](void *s, Args &) {
+    lmnet::TcpConn conn;
+    std::string error;
+    if (!lmnet::tcp_accept(*tcp_listener_of(s, "accept"), conn, error))
+      throw dslvm::Error("accept: " + error);
+    return host.hold(host.tcp_conns, "TcpConn", std::move(conn));
+  });
+  reg.method("TcpConn", "send", {"string"}, "void", [tcp_fail](void *s, Args &args) {
+    tcp_conn_of(s, "send")->send(args[0].s, tcp_fail);
+    return Value::none();
+  });
+  reg.method("TcpConn", "recv", {"int"}, "string", [tcp_fail](void *s, Args &args) {
+    return Value::string(tcp_conn_of(s, "recv")->recv(args[0].i, tcp_fail));
+  });
+  reg.method("TcpConn", "close", {}, "void", [](void *s, Args &) {
+    tcp_conn_of(s, "close")->close();
+    return Value::none();
+  });
 }
 
 void print_schema_summary(const dslvm::Registry &reg) {
@@ -858,6 +912,7 @@ int main(int argc, char **argv) {
       "       lmnet sockets [tcp|udp|unix] [--listen] [--summary]  # socket tables (netstat/lsof -i-lite, ss -s-lite)\n"
       "       lmnet trace HOST [maxttl]  # UDP-probe traceroute as JSON (traceroute-lite)\n"
       "       lmnet scan HOST [--ports SPEC] [--timeout MS] [--concurrency N]  # TCP connect port scanner as JSON (nmap-lite)\n"
+      "       lmnet pipe HOST PORT | --listen PORT [--forever]  # TCP stdio bridge (nc-lite)\n"
       "       lmnet iperf3 [iperf3 options]   # the real iperf3 engine (client/server)\n"
       "       lmnet --dsl FILE [FILE ...]\n";
   if (argc == 2 && std::string(argv[1]) == "--version") {
@@ -1146,6 +1201,60 @@ int main(int argc, char **argv) {
     }
     std::cout << scan_json(result) << "\n";
     return std::cout ? 0 : 4;
+  }
+  if (argc >= 3 && std::string(argv[1]) == "pipe") {
+    auto parse_pipe_port = [](const char *s, int *out) {
+      const std::string str = s ? s : "";
+      if (str.empty() || str.size() > 5) return false;
+      for (char c : str)
+        if (c < '0' || c > '9') return false;
+      const int v = std::atoi(str.c_str());
+      if (v < 1 || v > 65535) return false;
+      *out = v;
+      return true;
+    };
+    if (std::string(argv[2]) == "--listen") {
+      if (argc < 4 || argc > 5) {
+        std::cerr << usage;
+        return 2;
+      }
+      int port = 0;
+      if (!parse_pipe_port(argv[3], &port)) {
+        std::cerr << usage;
+        return 2;
+      }
+      bool forever = false;
+      if (argc == 5) {
+        if (std::string(argv[4]) != "--forever") {
+          std::cerr << usage;
+          return 2;
+        }
+        forever = true;
+      }
+      std::string error;
+      const int rc = lmnet::pipe_listen(port, forever, error);
+      if (rc != 0) {
+        std::cerr << "lmnet pipe: " << error << "\n";
+        return rc;
+      }
+      return 0;
+    }
+    if (argc != 4) {
+      std::cerr << usage;
+      return 2;
+    }
+    int port = 0;
+    if (!parse_pipe_port(argv[3], &port)) {
+      std::cerr << usage;
+      return 2;
+    }
+    std::string error;
+    const int rc = lmnet::pipe_connect(argv[2], port, error);
+    if (rc != 0) {
+      std::cerr << "lmnet pipe: " << argv[2] << ":" << port << ": " << error << "\n";
+      return rc;
+    }
+    return 0;
   }
   if (argc >= 3 && std::string(argv[1]) == "--dsl") {
     for (int i = 2; i < argc; ++i) {

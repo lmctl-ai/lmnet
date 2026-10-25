@@ -8,9 +8,14 @@ stat_size(){ stat -c %s "$1" 2>/dev/null || stat -f%z "$1"; }
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/lmnet-test-XXXXXX")"
 pass=0
 FAKE_DNS_PID=""
+PIPE_ECHO_PID=""
+PIPE_LISTEN_PID=""
 ok(){ pass=$((pass+1)); echo "ok $pass - $1"; }
 fail(){ echo "FAIL: $*" >&2; exit 1; }
-cleanup(){ [ -z "$FAKE_DNS_PID" ] || kill "$FAKE_DNS_PID" 2>/dev/null || true; rm -rf "$WORK"; }
+cleanup(){ [ -z "$FAKE_DNS_PID" ] || kill "$FAKE_DNS_PID" 2>/dev/null || true;
+  [ -z "$PIPE_ECHO_PID" ] || kill "$PIPE_ECHO_PID" 2>/dev/null || true;
+  [ -z "$PIPE_LISTEN_PID" ] || kill "$PIPE_LISTEN_PID" 2>/dev/null || true;
+  rm -rf "$WORK"; }
 trap cleanup EXIT
 
 LMSCRIPT="$(scripts/select-compiler.sh)"
@@ -442,6 +447,149 @@ ok "bytecode: net.check + net.scan through the DSL"
 kill "$SCAN_SRV_PID" 2>/dev/null || true
 SCAN_SRV_PID=""
 
+# --- pipe subcommand (TCP stdio bridge; nc-lite) ---
+# Deterministic on loopback: an echo server on 15356 covers connect mode,
+# `pipe --listen` on 15357 covers listen mode, 15358 is reserved (never
+# listened) for the refused-connect check, and 15359/15360 carry the DSL
+# socket objects (tcp_connect against an echo server, tcp_listen/accept
+# against a pre-spawned retry-connecting client). 15353-15355 belong to the
+# DNS/summary/scan fixtures above. The echo servers stream every chunk
+# straight back (echo-on-arrival), so a scripted recv() gets its reply
+# without half-closing the connection.
+cat > "$WORK/pipe-echo.py" <<'PY'
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[1])))
+s.listen(5)
+while True:
+    conn, _ = s.accept()
+    while True:
+        chunk = conn.recv(65536)
+        if not chunk:
+            break
+        conn.sendall(chunk)
+    conn.close()
+PY
+python3 "$WORK/pipe-echo.py" 15356 &
+PIPE_ECHO_PID=$!
+# Readiness: a probe relay (immediate stdin EOF, clean exit 0) once the
+# listener is up; refused connects exit 1 and keep us polling.
+for _ in $(seq 1 25); do
+  if printf '' | "$HOST" pipe 127.0.0.1 15356 2>/dev/null; then break; fi
+  sleep 0.2
+done
+printf 'hello lmnet' | "$HOST" pipe 127.0.0.1 15356 >"$WORK/pipe-echo-out" 2>"$WORK/pipe-echo-err" ||
+  fail "pipe connect mode: $(cat "$WORK/pipe-echo-err")"
+printf 'hello lmnet' >"$WORK/pipe-echo-want"
+cmp "$WORK/pipe-echo-want" "$WORK/pipe-echo-out" ||
+  fail "pipe echo roundtrip: got $(cat "$WORK/pipe-echo-out")"
+ok "pipe connect mode: stdin->socket->stdout echo roundtrip"
+kill "$PIPE_ECHO_PID" 2>/dev/null || true
+PIPE_ECHO_PID=""
+
+# Listen mode: the listener's stdin becomes the client's first read, and
+# whatever the client writes back lands on the listener's stdout.
+printf 'from-listener' | "$HOST" pipe --listen 15357 >"$WORK/pipe-listen-out" 2>"$WORK/pipe-listen-err" &
+PIPE_LISTEN_PID=$!
+python3 - <<'PY'
+import socket, sys, time
+deadline = time.time() + 10
+conn = None
+while time.time() < deadline:  # retry until the listener has bound
+    try:
+        conn = socket.create_connection(("127.0.0.1", 15357), timeout=10)
+        break
+    except OSError:
+        time.sleep(0.1)
+if conn is None:
+    sys.exit("pipe --listen never came up")
+conn.settimeout(10)
+data = b""
+while len(data) < len(b"from-listener"):
+    chunk = conn.recv(65536)
+    if not chunk:
+        break
+    data += chunk
+assert data == b"from-listener", data
+conn.sendall(b"reply-bytes")
+conn.close()
+PY
+wait "$PIPE_LISTEN_PID" ||
+  fail "pipe --listen exited nonzero: $(cat "$WORK/pipe-listen-err")"
+PIPE_LISTEN_PID=""
+printf 'reply-bytes' >"$WORK/pipe-listen-want"
+cmp "$WORK/pipe-listen-want" "$WORK/pipe-listen-out" ||
+  fail "pipe --listen relay: got $(cat "$WORK/pipe-listen-out")"
+ok "pipe --listen mode: one accepted connection relayed both ways"
+
+# 15358 is never listened on, so the connect is refused deterministically.
+set +e; "$HOST" pipe 127.0.0.1 15358 >"$WORK/pipe-refused.out" 2>"$WORK/pipe-refused.err"; code=$?; set -e
+[ "$code" = 1 ] || fail "pipe refused connect exits 1 (got $code): $(cat "$WORK/pipe-refused.err")"
+grep -q 'lmnet pipe' "$WORK/pipe-refused.err" ||
+  fail "pipe error names the tool: $(cat "$WORK/pipe-refused.err")"
+grep -q '127\.0\.0\.1:15358' "$WORK/pipe-refused.err" ||
+  fail "pipe error names the endpoint: $(cat "$WORK/pipe-refused.err")"
+ok "pipe connect failure exits 1 naming the endpoint"
+
+# DSL parity: blocking socket objects. tcp_connect speaks to the echo
+# server on 15359; tcp_listen/accept on 15360 pairs with a pre-spawned
+# retry-connecting client so the accept never blocks the suite.
+python3 "$WORK/pipe-echo.py" 15359 &
+PIPE_ECHO_PID=$!
+for _ in $(seq 1 25); do
+  if printf '' | "$HOST" pipe 127.0.0.1 15359 2>/dev/null; then break; fi
+  sleep 0.2
+done
+python3 - <<'PY' &
+import socket, sys, time
+deadline = time.time() + 15
+conn = None
+while time.time() < deadline:  # retry until the DSL listener binds
+    try:
+        conn = socket.create_connection(("127.0.0.1", 15360), timeout=15)
+        break
+    except OSError:
+        time.sleep(0.1)
+if conn is None:
+    sys.exit("DSL tcp_listen never came up")
+conn.settimeout(15)
+conn.sendall(b"dsl-listener")
+ack = b""
+while True:
+    chunk = conn.recv(65536)
+    if not chunk:
+        break
+    ack += chunk
+assert ack == b"ack", ack
+conn.close()
+PY
+PIPE_DSL_CLIENT_PID=$!
+cat > "$WORK/tcpsock.lms" <<EOF
+p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+let c = net.tcp_connect("127.0.0.1", 15359);
+c.send("ping");
+let r = c.recv(64);
+println("echo: " + r);
+c.close();
+let l = net.tcp_listen(15360);
+let lc = l.accept();
+let m = lc.recv(64);
+println("got: " + m);
+lc.send("ack");
+lc.close();
+end _dsl_
+savedsl(p, "$WORK/tcpsock.dslb");
+EOF
+"$LMSCRIPT" "$WORK/tcpsock.lms" "$WORK/tcpsock.dslb" >/dev/null || fail "tcpsock compile"
+out="$("$HOST" --dsl "$WORK/tcpsock.dslb")"
+grep -q '^echo: ping$' <<<"$out" || fail "net.tcp_connect roundtrip: $out"
+grep -q '^got: dsl-listener$' <<<"$out" || fail "TcpListener.accept roundtrip: $out"
+wait "$PIPE_DSL_CLIENT_PID" || fail "DSL listener client failed"
+kill "$PIPE_ECHO_PID" 2>/dev/null || true
+PIPE_ECHO_PID=""
+ok "bytecode: net.tcp_connect + net.tcp_listen/TcpListener.accept through the DSL"
+
 # --- route subcommand (rtnetlink dump, ip route-lite) ---
 out="$("$HOST" route)"
 ROUTE_OUT="$out" python3 - <<'PY'
@@ -789,7 +937,7 @@ ok "multiple bytecode files run sequentially"
 
 # --- examples compile and run ---
 mkdir -p build
-for f in counters dns-lookup dns-query interfaces link neigh routes rule scan sockets sockets-summary trace; do
+for f in counters dns-lookup dns-query interfaces link neigh pipe routes rule scan sockets sockets-summary trace; do
   [ -f "examples/$f.lms" ] || continue
   "$LMSCRIPT" "examples/$f.lms" "build/$f.dslb" >"$WORK/$f.compile.log" 2>&1 || fail "$f example compile"
   "$HOST" --dsl "build/$f.dslb" >"$WORK/$f.out" || fail "$f example run"

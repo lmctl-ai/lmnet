@@ -27,6 +27,9 @@ host CLI the same way lmscript resolves any other tool.
 - `scan.lms` — TCP-connect scan of one loopback port via `net.scan` /
   `net.check` (works offline; the verdict depends on the machine, so only
   the framing lines are pinned)
+- `pipe.lms` — the `lmnet pipe` TCP stdio bridge and its socket objects
+  (`net.tcp_connect`/`net.tcp_listen`; works offline, a live roundtrip needs
+  a peer, so only the framing lines are pinned)
 - `trace.lms` — traceroute 127.0.0.1 and print the hop list (degrades to an
   error message without raw-socket permission)
 

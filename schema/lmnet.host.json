@@ -16,6 +16,8 @@
         "scan": [{"params": ["string", "string"], "returns": "ScanResult"}],
         "socket_summary": [{"params": ["string"], "returns": "SocketSummary"}],
         "sockets": [{"params": ["string", "bool"], "returns": "SocketList"}],
+        "tcp_connect": [{"params": ["string", "int"], "returns": "TcpConn"}],
+        "tcp_listen": [{"params": ["int"], "returns": "TcpListener"}],
         "trace": [{"params": ["string", "int"], "returns": "TraceResult"}]
       }
     },
@@ -203,6 +205,18 @@
         "dest_ip": [{"params": [], "returns": "string"}],
         "error": [{"params": [], "returns": "string"}],
         "hops": [{"params": [], "returns": "HopList"}]
+      }
+    },
+    "TcpConn": {
+      "methods": {
+        "send": [{"params": ["string"], "returns": "void"}],
+        "recv": [{"params": ["int"], "returns": "string"}],
+        "close": [{"params": [], "returns": "void"}]
+      }
+    },
+    "TcpListener": {
+      "methods": {
+        "accept": [{"params": [], "returns": "TcpConn"}]
       }
     },
     "Hop": {
