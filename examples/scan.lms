@@ -1,7 +1,7 @@
 # Chapter: Basics - TCP port scan (nmap-lite)
 # Shows: net.scan, net.check, ScanResult host/resolved/open/closed/filtered/ports,
 #        Port number/state/service, PortList len/at
-# Run: lmscript examples/scan.lms      (then: lmnet --dsl build/scan.dslb)
+# Run: lmscript examples/scan.lms      (then: lmnet --lmcode build/scan.dslb)
 # Needs: nothing (offline); probes 127.0.0.1 port 1, which is closed on
 #        practically every machine — but the verdict is data, not an error,
 #        so no assertion pins it and only the framing lines are pinned.

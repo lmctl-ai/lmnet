@@ -37,8 +37,8 @@ Produces `build/lmnet`: one statically linked executable (`ldd` reports
 
 ```
 lmnet --version
-lmnet --dsl-schema [--json]
-lmnet --dsl-signatures
+lmnet --lmcode-schema [--json]
+lmnet --lmcode-signatures
 lmnet ping HOST [iputils ping options]        # the real iputils ping engine
 lmnet tracepath HOST [iputils tracepath options]
 lmnet iperf3 [iperf3 options]                   # the real iperf3 engine (client/server)
@@ -54,7 +54,7 @@ lmnet sockets [tcp|udp|unix] [--listen] [--summary]  # socket tables as JSON (ne
 lmnet trace HOST [maxttl]                     # UDP-probe traceroute as JSON (traceroute-lite)
 lmnet scan HOST [--ports SPEC] [--timeout MS] [--concurrency N]  # TCP connect port scanner as JSON (nmap-lite)
 lmnet pipe HOST PORT | --listen PORT [--forever]  # TCP stdio bridge (nc-lite)
-lmnet --dsl FILE [FILE ...]
+lmnet --lmcode FILE [FILE ...]
 ```
 
 `ping` and `tracepath` are the upstream iputils binaries-in-a-binary: same

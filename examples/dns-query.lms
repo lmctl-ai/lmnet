@@ -1,6 +1,6 @@
 # Chapter: Basics - DNS query (dig-lite)
 # Shows: net.dns_query, DnsResult.rcode/error/answers, DnsAnswer fields
-# Run: lmscript examples/dns-query.lms      (then: lmnet --dsl build/dns-query.dslb)
+# Run: lmscript examples/dns-query.lms      (then: lmnet --lmcode build/dns-query.dslb)
 # Needs: nothing (offline); queries 127.0.0.1:9 where nothing listens, so the
 #        query fails fast and cleanly. The failure text itself is OS-dependent
 #        ("connection refused" vs "timeout"), so only the stable shape of the

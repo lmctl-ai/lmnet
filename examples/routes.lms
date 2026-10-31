@@ -1,7 +1,7 @@
 # Chapter: Basics - routing tables
 # Shows: net.routes, Route.dest/via/dev/proto/scope/metric/table/prefsrc,
 #        RouteList len/at, scanning for a default route
-# Run: lmscript examples/routes.lms      (then: lmnet --dsl build/routes.dslb)
+# Run: lmscript examples/routes.lms      (then: lmnet --lmcode build/routes.dslb)
 # Needs: nothing (offline); rtnetlink dumps the kernel tables directly. Route
 #        contents vary per host, so only the constant lines are asserted.
 # exit: 0

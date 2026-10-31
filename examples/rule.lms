@@ -1,7 +1,7 @@
 # Chapter: Basics - policy routing rules (ip rule-lite)
 # Shows: net.rules, Rule pref/family/table/action/from/to/fwmark/iif/oif/goto_target,
 #        RuleList len/at
-# Run: lmscript examples/rule.lms      (then: lmnet --dsl build/rule.dslb)
+# Run: lmscript examples/rule.lms      (then: lmnet --lmcode build/rule.dslb)
 # Needs: nothing (offline); rtnetlink dumps the rule list directly.
 #        The pref-0 local rule always exists, so the "found" line is pinned.
 # exit: 0

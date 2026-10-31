@@ -1,6 +1,6 @@
 # Chapter: Basics - kernel networking counters (netstat -s/nstat-lite)
 # Shows: net.counters, Counter.name/value, CounterList len/at
-# Run: lmscript examples/counters.lms   (then: lmnet --dsl build/counters.dslb)
+# Run: lmscript examples/counters.lms   (then: lmnet --lmcode build/counters.dslb)
 # Needs: nothing (offline); reads /proc/net/{snmp,netstat,snmp6}. A missing
 #        source degrades silently; only an unreadable /proc fails the run.
 #        The count line is NOT pinned (kernel-dependent).

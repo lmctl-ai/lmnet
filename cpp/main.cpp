@@ -898,7 +898,7 @@ int main(int argc, char **argv) {
   dslvm::Registry reg;
   register_host(reg, host);
   const std::string usage =
-      "usage: lmnet --version | --dsl-schema [--json] | --dsl-signatures\n"
+      "usage: lmnet --version | --lmcode-schema [--json] | --lmcode-signatures\n"
       "       lmnet ping HOST [iputils ping options]\n"
       "       lmnet tracepath HOST [iputils tracepath options]\n"
       "       lmnet dns HOST        # resolve addresses (nslookup-lite)\n"
@@ -914,12 +914,12 @@ int main(int argc, char **argv) {
       "       lmnet scan HOST [--ports SPEC] [--timeout MS] [--concurrency N]  # TCP connect port scanner as JSON (nmap-lite)\n"
       "       lmnet pipe HOST PORT | --listen PORT [--forever]  # TCP stdio bridge (nc-lite)\n"
       "       lmnet iperf3 [iperf3 options]   # the real iperf3 engine (client/server)\n"
-      "       lmnet --dsl FILE [FILE ...]\n";
+      "       lmnet --lmcode FILE [FILE ...]\n";
   if (argc == 2 && std::string(argv[1]) == "--version") {
     std::cout << "lmnet " LMNET_VERSION "\n";
     return std::cout ? 0 : 4;
   }
-  if (argc >= 2 && std::string(argv[1]) == "--dsl-schema") {
+  if (argc >= 2 && std::string(argv[1]) == "--lmcode-schema") {
     if (argc == 2) {
       print_schema_summary(reg);
       return std::cout ? 0 : 4;
@@ -932,7 +932,7 @@ int main(int argc, char **argv) {
     std::cerr << usage;
     return 2;
   }
-  if (argc == 2 && std::string(argv[1]) == "--dsl-signatures") {
+  if (argc == 2 && std::string(argv[1]) == "--lmcode-signatures") {
     for (const auto &signature : reg.signatures()) std::cout << signature << "\n";
     return 0;
   }
@@ -1256,7 +1256,7 @@ int main(int argc, char **argv) {
     }
     return 0;
   }
-  if (argc >= 3 && std::string(argv[1]) == "--dsl") {
+  if (argc >= 3 && std::string(argv[1]) == "--lmcode") {
     for (int i = 2; i < argc; ++i) {
       if (std::string(argv[i]).empty() || std::string(argv[i]).rfind("--", 0) == 0) {
         std::cerr << usage;

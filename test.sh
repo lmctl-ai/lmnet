@@ -32,6 +32,7 @@ cmake -S . -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release >"$WORK/cmake.log
 cmake --build "$BUILD_DIR" -j2 >"$WORK/build.log" 2>&1 ||
   { tail -30 "$WORK/build.log" >&2; fail "cmake build ($BUILD_DIR)"; }
 ok "host build ($BUILD_DIR)"
+python3 tests/check-host-flags.py schema/lmnet.dsl.json "$HOST" || fail "hard host flag cutover"
 # install= prefers a matching host executable on PATH; put this test build first.
 LOCAL_HOST_DIR="$(cd "$BUILD_DIR" && pwd)"
 PATH="$LOCAL_HOST_DIR:$PATH"
@@ -43,7 +44,7 @@ set +e; "$HOST" --version extra >/dev/null 2>&1; code=$?; set -e
 [ "$code" = 2 ] || fail "--version with an extra argument exits 2 (got $code)"
 ok "--version prints exactly '$want_version'"
 
-"$HOST" --dsl-schema --json >"$WORK/embedded-schema.json" || fail "embedded schema print"
+"$HOST" --lmcode-schema --json >"$WORK/embedded-schema.json" || fail "embedded schema print"
 python3 - "$WORK/embedded-schema.json" <<'PY'
 import json,sys
 d=json.load(open(sys.argv[1]))  # strict: must be valid JSON
@@ -54,21 +55,21 @@ assert 'StrList' not in d['types'], 'standard types must stay implicit'
 print('embedded schema: host-only Net/Iface/IfaceList and route types')
 PY
 cmp schema/lmnet.dsl.json "$WORK/embedded-schema.json" || fail "embedded schema differs from host-only schema bytes"
-ok "--dsl-schema --json prints byte-identical host-only schema bytes"
-"$HOST" --dsl-schema >"$WORK/schema-summary.txt" || fail "schema summary print"
+ok "--lmcode-schema --json prints byte-identical host-only schema bytes"
+"$HOST" --lmcode-schema >"$WORK/schema-summary.txt" || fail "schema summary print"
 python3 - "$WORK/schema-summary.txt" <<'PY'
 import subprocess,sys
 summary=open(sys.argv[1]).read()
-sigs=subprocess.run(['build/lmnet','--dsl-signatures'],capture_output=True,text=True).stdout.splitlines()
+sigs=subprocess.run(['build/lmnet','--lmcode-signatures'],capture_output=True,text=True).stdout.splitlines()
 missing=[]
 for line in sigs:
     needle=line.split(' ',1)[1] if ' ' in line else line
     if needle not in summary: missing.append(needle)
 assert not missing, missing
-print('all', len(sigs), 'registry members listed in --dsl-schema summary')
+print('all', len(sigs), 'registry members listed in --lmcode-schema summary')
 PY
-ok "--dsl-schema summary lists every registry member"
-diff -u <("$LMSCRIPT" --dsl-signatures schema/lmnet.dsl.json) <("$HOST" --dsl-signatures) || fail "host/compiler signatures differ"
+ok "--lmcode-schema summary lists every registry member"
+diff -u <("$LMSCRIPT" --lmcode-signatures schema/lmnet.dsl.json) <("$HOST" --lmcode-signatures) || fail "host/compiler signatures differ"
 ok "typed registry signatures match compiler schema signatures"
 
 # --- dns subcommand ---
@@ -137,7 +138,7 @@ end _dsl_
 savedsl(p, "$WORK/dig.dslb");
 EOF
 "$LMSCRIPT" "$WORK/dig.lms" "$WORK/dig.dslb" >/dev/null || fail "dig bytecode compile"
-out="$("$HOST" --dsl "$WORK/dig.dslb")"
+out="$("$HOST" --lmcode "$WORK/dig.dslb")"
 grep -q '^rcode: NOERROR$' <<<"$out" || fail "dig bytecode rcode: $out"
 grep -q '^data: 93\.184\.216\.34$' <<<"$out" || fail "dig bytecode data: $out"
 grep -q '^ttl: 300$' <<<"$out" || fail "dig bytecode ttl: $out"
@@ -165,7 +166,7 @@ end _dsl_
 savedsl(p, "$WORK/dnsoob.dslb");
 EOF
 "$LMSCRIPT" "$WORK/dnsoob.lms" "$WORK/dnsoob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --dsl "$WORK/dnsoob.dslb" 2>&1)"; code=$?; set -e
+set +e; out="$("$HOST" --lmcode "$WORK/dnsoob.dslb" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "DnsAnswerList.at bounds (exit $code): $out"
 ok "DnsAnswerList.at out of range refused (exit 3)"
 
@@ -276,7 +277,7 @@ end _dsl_
 savedsl(p, "$WORK/socks.dslb");
 EOF
 "$LMSCRIPT" "$WORK/socks.lms" "$WORK/socks.dslb" >/dev/null || fail "socks compile"
-out="$("$HOST" --dsl "$WORK/socks.dslb")"
+out="$("$HOST" --lmcode "$WORK/socks.dslb")"
 grep -q '^tcp listeners: [1-9]' <<<"$out" || fail "sockets bytecode: $out"
 ok "bytecode: net.sockets through the DSL"
 
@@ -335,7 +336,7 @@ end _dsl_
 savedsl(p, "$WORK/socksum.dslb");
 EOF
 "$LMSCRIPT" "$WORK/socksum.lms" "$WORK/socksum.dslb" >/dev/null || fail "socksum compile"
-out="$("$HOST" --dsl "$WORK/socksum.dslb")"
+out="$("$HOST" --lmcode "$WORK/socksum.dslb")"
 SOCKSUM_OUT="$out" python3 - <<'PY'
 import os, re
 line = next((l for l in os.environ["SOCKSUM_OUT"].splitlines()
@@ -438,7 +439,7 @@ end _dsl_
 savedsl(p, "$WORK/sockscan.dslb");
 EOF
 "$LMSCRIPT" "$WORK/sockscan.lms" "$WORK/sockscan.dslb" >/dev/null || fail "sockscan compile"
-out="$("$HOST" --dsl "$WORK/sockscan.dslb")"
+out="$("$HOST" --lmcode "$WORK/sockscan.dslb")"
 grep -q '^check open: true$' <<<"$out" || fail "net.check open port: $out"
 grep -q '^check closed: false$' <<<"$out" || fail "net.check closed port: $out"
 grep -q '^scan open=1$' <<<"$out" || fail "net.scan open count: $out"
@@ -582,7 +583,7 @@ end _dsl_
 savedsl(p, "$WORK/tcpsock.dslb");
 EOF
 "$LMSCRIPT" "$WORK/tcpsock.lms" "$WORK/tcpsock.dslb" >/dev/null || fail "tcpsock compile"
-out="$("$HOST" --dsl "$WORK/tcpsock.dslb")"
+out="$("$HOST" --lmcode "$WORK/tcpsock.dslb")"
 grep -q '^echo: ping$' <<<"$out" || fail "net.tcp_connect roundtrip: $out"
 grep -q '^got: dsl-listener$' <<<"$out" || fail "TcpListener.accept roundtrip: $out"
 wait "$PIPE_DSL_CLIENT_PID" || fail "DSL listener client failed"
@@ -615,7 +616,7 @@ end _dsl_
 savedsl(p, "$WORK/routes.dslb");
 EOF
 "$LMSCRIPT" "$WORK/routes.lms" "$WORK/routes.dslb" >/dev/null || fail "routes compile"
-out="$("$HOST" --dsl "$WORK/routes.dslb")"
+out="$("$HOST" --lmcode "$WORK/routes.dslb")"
 grep -q '^routes: [1-9]' <<<"$out" || fail "routes bytecode count: $out"
 grep -q '^first: .*proto=' <<<"$out" || fail "routes bytecode first route: $out"
 ok "bytecode: net.routes through the DSL"
@@ -627,7 +628,7 @@ end _dsl_
 savedsl(p, "$WORK/routeoob.dslb");
 EOF
 "$LMSCRIPT" "$WORK/routeoob.lms" "$WORK/routeoob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --dsl "$WORK/routeoob.dslb" 2>&1)"; code=$?; set -e
+set +e; out="$("$HOST" --lmcode "$WORK/routeoob.dslb" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "RouteList.at bounds (exit $code): $out"
 ok "RouteList.at out of range refused (exit 3)"
 
@@ -658,7 +659,7 @@ end _dsl_
 savedsl(p, "$WORK/neigh.dslb");
 EOF
 "$LMSCRIPT" "$WORK/neigh.lms" "$WORK/neigh.dslb" >/dev/null || fail "neigh compile"
-out="$("$HOST" --dsl "$WORK/neigh.dslb")"
+out="$("$HOST" --lmcode "$WORK/neigh.dslb")"
 grep -Eq '^neighbors: [0-9]+$' <<<"$out" || fail "neigh bytecode count: $out"
 ok "bytecode: net.neighbors through the DSL"
 
@@ -669,7 +670,7 @@ end _dsl_
 savedsl(p, "$WORK/neighoob.dslb");
 EOF
 "$LMSCRIPT" "$WORK/neighoob.lms" "$WORK/neighoob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --dsl "$WORK/neighoob.dslb" 2>&1)"; code=$?; set -e
+set +e; out="$("$HOST" --lmcode "$WORK/neighoob.dslb" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "NeighborList.at bounds (exit $code): $out"
 ok "NeighborList.at out of range refused (exit 3)"
 
@@ -704,7 +705,7 @@ end _dsl_
 savedsl(p, "$WORK/links.dslb");
 EOF
 "$LMSCRIPT" "$WORK/links.lms" "$WORK/links.dslb" >/dev/null || fail "links compile"
-out="$("$HOST" --dsl "$WORK/links.dslb")"
+out="$("$HOST" --lmcode "$WORK/links.dslb")"
 grep -q '^links: [1-9]' <<<"$out" || fail "links bytecode count: $out"
 grep -q '^lo: up true mtu=' <<<"$out" || fail "links bytecode lo line: $out"
 ok "bytecode: net.links through the DSL"
@@ -716,7 +717,7 @@ end _dsl_
 savedsl(p, "$WORK/linkoob.dslb");
 EOF
 "$LMSCRIPT" "$WORK/linkoob.lms" "$WORK/linkoob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --dsl "$WORK/linkoob.dslb" 2>&1)"; code=$?; set -e
+set +e; out="$("$HOST" --lmcode "$WORK/linkoob.dslb" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "LinkList.at bounds (exit $code): $out"
 ok "LinkList.at out of range refused (exit 3)"
 
@@ -754,7 +755,7 @@ end _dsl_
 savedsl(p, "$WORK/counters.dslb");
 EOF
 "$LMSCRIPT" "$WORK/counters.lms" "$WORK/counters.dslb" >/dev/null || fail "counters compile"
-out="$("$HOST" --dsl "$WORK/counters.dslb")"
+out="$("$HOST" --lmcode "$WORK/counters.dslb")"
 grep -q '^counters: [1-9][0-9]' <<<"$out" || fail "counters bytecode count: $out"
 grep -q '^ip receives: [0-9][0-9]*$' <<<"$out" || fail "counters bytecode ip receives: $out"
 ok "bytecode: net.counters through the DSL"
@@ -766,7 +767,7 @@ end _dsl_
 savedsl(p, "$WORK/countersoob.dslb");
 EOF
 "$LMSCRIPT" "$WORK/countersoob.lms" "$WORK/countersoob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --dsl "$WORK/countersoob.dslb" 2>&1)"; code=$?; set -e
+set +e; out="$("$HOST" --lmcode "$WORK/countersoob.dslb" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "CounterList.at bounds (exit $code): $out"
 ok "CounterList.at out of range refused (exit 3)"
 
@@ -804,7 +805,7 @@ end _dsl_
 savedsl(p, "$WORK/rules.dslb");
 EOF
 "$LMSCRIPT" "$WORK/rules.lms" "$WORK/rules.dslb" >/dev/null || fail "rules compile"
-out="$("$HOST" --dsl "$WORK/rules.dslb")"
+out="$("$HOST" --lmcode "$WORK/rules.dslb")"
 grep -q '^rules: [1-9]' <<<"$out" || fail "rules bytecode count: $out"
 grep -q '^local rule found$' <<<"$out" || fail "rules bytecode local rule: $out"
 ok "bytecode: net.rules through the DSL"
@@ -816,7 +817,7 @@ end _dsl_
 savedsl(p, "$WORK/ruleoob.dslb");
 EOF
 "$LMSCRIPT" "$WORK/ruleoob.lms" "$WORK/ruleoob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --dsl "$WORK/ruleoob.dslb" 2>&1)"; code=$?; set -e
+set +e; out="$("$HOST" --lmcode "$WORK/ruleoob.dslb" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "RuleList.at bounds (exit $code): $out"
 ok "RuleList.at out of range refused (exit 3)"
 
@@ -864,7 +865,7 @@ end _dsl_
 savedsl(p, "$WORK/trace.dslb");
 EOF
 "$LMSCRIPT" "$WORK/trace.lms" "$WORK/trace.dslb" >/dev/null || fail "trace compile"
-out="$("$HOST" --dsl "$WORK/trace.dslb")"
+out="$("$HOST" --lmcode "$WORK/trace.dslb")"
 if [ "$TRACE_RAW" = 1 ]; then
   grep -q '^dest: 127\.0\.0\.1$' <<<"$out" || fail "trace bytecode dest: $out"
   grep -q '^hops: 1$' <<<"$out" || fail "trace bytecode hops: $out"
@@ -884,7 +885,7 @@ end _dsl_
 savedsl(p, "$WORK/traceoob.dslb");
 EOF
 "$LMSCRIPT" "$WORK/traceoob.lms" "$WORK/traceoob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --dsl "$WORK/traceoob.dslb" 2>&1)"; code=$?; set -e
+set +e; out="$("$HOST" --lmcode "$WORK/traceoob.dslb" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "HopList.at bounds (exit $code): $out"
 ok "HopList.at out of range refused (exit 3)"
 
@@ -906,8 +907,8 @@ end _dsl_
 savedsl(p, "$WORK/smoke.dslb");
 EOF
 "$LMSCRIPT" "$WORK/smoke.lms" "$WORK/smoke.dslb" >/dev/null || fail "smoke compile"
-[ "$(od -An -t u1 -j 5 -N 1 "$WORK/smoke.dslb" | tr -d ' ')" = 5 ] || fail "smoke was not compiled as bytecode v5"
-out="$("$HOST" --dsl "$WORK/smoke.dslb")"
+[ "$(od -An -t u1 -j 5 -N 1 "$WORK/smoke.dslb" | tr -d ' ')" = 6 ] || fail "smoke was not compiled as bytecode v6"
+out="$("$HOST" --lmcode "$WORK/smoke.dslb")"
 [ "$(tail -1 <<<"$out")" = '{"ok": true, "result": null}' ] || fail "smoke run: $out"
 grep -q '^localhost -> [1-9]' <<<"$out" || fail "smoke dns line: $out"
 grep -q 'lo 127\.0\.0\.1/8 mtu=' <<<"$out" || grep -q 'lo ::1/128 mtu=' <<<"$out" || fail "smoke interfaces line: $out"
@@ -920,18 +921,18 @@ end _dsl_
 savedsl(p, "$WORK/oob.dslb");
 EOF
 "$LMSCRIPT" "$WORK/oob.lms" "$WORK/oob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --dsl "$WORK/oob.dslb" 2>&1)"; code=$?; set -e
+set +e; out="$("$HOST" --lmcode "$WORK/oob.dslb" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "IfaceList.at bounds (exit $code): $out"
 ok "IfaceList.at out of range refused (exit 3)"
 
 set +e; out="$("$HOST" 2>&1)"; code=$?; set -e
 [ "$code" = 2 ] && [[ "$out" == *'usage: lmnet'* ]] || fail "bad args refusal (exit $code): $out"
 ok "bad arguments refused (exit 2)"
-set +e; out="$("$HOST" --dsl "$WORK/no-such.dslb" 2>&1)"; code=$?; set -e
+set +e; out="$("$HOST" --lmcode "$WORK/no-such.dslb" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'"phase": "load"'* ]] || fail "missing bytecode refusal (exit $code): $out"
 ok "missing bytecode file refused at load (exit 3)"
 
-"$HOST" --dsl "$WORK/smoke.dslb" "$WORK/smoke.dslb" >"$WORK/multi.jsonl" || fail "multi-bytecode run"
+"$HOST" --lmcode "$WORK/smoke.dslb" "$WORK/smoke.dslb" >"$WORK/multi.jsonl" || fail "multi-bytecode run"
 [ "$(grep -c '^{"ok"' "$WORK/multi.jsonl" | tr -d ' ')" = 2 ] || fail "multiple bytecode files did not run in order"
 ok "multiple bytecode files run sequentially"
 
@@ -940,7 +941,7 @@ mkdir -p build
 for f in counters dns-lookup dns-query interfaces link neigh pipe routes rule scan sockets sockets-summary trace; do
   [ -f "examples/$f.lms" ] || continue
   "$LMSCRIPT" "examples/$f.lms" "build/$f.dslb" >"$WORK/$f.compile.log" 2>&1 || fail "$f example compile"
-  "$HOST" --dsl "build/$f.dslb" >"$WORK/$f.out" || fail "$f example run"
+  "$HOST" --lmcode "build/$f.dslb" >"$WORK/$f.out" || fail "$f example run"
   while IFS= read -r line; do
     grep -qxF "${line:2}" "$WORK/$f.out" || fail "$f example output missing: ${line:2} (got $(cat "$WORK/$f.out"))"
   done < <(grep '^#|' "examples/$f.lms")
@@ -952,9 +953,9 @@ LDD_OUT="$(ldd "$HOST" 2>&1 || true)"
 ok "host is fully static ($(stat_size "$HOST") bytes, ldd clean)"
 
 # The published compiler injects std; the host embeds only its own schema bytes.
-"$LMSCRIPT" --dsl-signatures schema/lmnet.dsl.json --without-std > "$WORK/std-host-only.sig"
-"$LMSCRIPT" --dsl-signatures cpp/std/lmcode-std.schema.json > "$WORK/std-builtins.sig"
-"$HOST" --dsl-signatures > "$WORK/std-registry.sig"
+"$LMSCRIPT" --lmcode-signatures schema/lmnet.dsl.json --without-std > "$WORK/std-host-only.sig"
+"$LMSCRIPT" --lmcode-signatures cpp/std/lmcode-std.schema.json > "$WORK/std-builtins.sig"
+"$HOST" --lmcode-signatures > "$WORK/std-registry.sig"
 python3 - "$WORK" <<'PYSTD'
 import pathlib,sys,json
 w=pathlib.Path(sys.argv[1])
@@ -965,7 +966,7 @@ out=str(w/'std-probe.dslb').replace('\\','/')
 (w/'std-probe.lms').write_text('p = _lmcode_ schema='+json.dumps(schema)+';\nlet values = str_list().add("abc");\nif (str_len(values.at(0)) != 3) { let bad = int_list().at(0); }\nend _lmcode_\nsavedsl(p, '+json.dumps(out)+');\n')
 PYSTD
 "$LMSCRIPT" "$WORK/std-probe.lms" > "$WORK/std-probe.log" 2>&1 || { cat "$WORK/std-probe.log"; fail "implicit std compile"; }
-"$HOST" --dsl "$WORK/std-probe.dslb" > "$WORK/std-run.log" 2>&1 || { cat "$WORK/std-run.log"; fail "implicit std runtime"; }
+"$HOST" --lmcode "$WORK/std-probe.dslb" > "$WORK/std-run.log" 2>&1 || { cat "$WORK/std-run.log"; fail "implicit std runtime"; }
 ok "host-only signatures and implicit std runtime"
 
 echo "PASS: $pass checks"

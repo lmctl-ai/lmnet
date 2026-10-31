@@ -5,7 +5,7 @@ runs against the `lmnet` host:
 
 ```sh
 lmscript examples/dns-lookup.lms build/dns-lookup.dslb
-lmnet --dsl build/dns-lookup.dslb
+lmnet --lmcode build/dns-lookup.dslb
 ```
 
 The `install="github:lmctl-ai/lmnet@latest"` line in each script pins the

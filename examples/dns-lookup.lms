@@ -1,6 +1,6 @@
 # Chapter: Basics - DNS lookup
 # Shows: net.dns_lookup, std StrList len/at/contains, loopback resolution
-# Run: lmscript examples/dns-lookup.lms      (then: lmnet --dsl build/dns-lookup.dslb)
+# Run: lmscript examples/dns-lookup.lms      (then: lmnet --lmcode build/dns-lookup.dslb)
 # Needs: nothing special; localhost resolves via the hosts database offline.
 #        Address order and IPv6 availability vary per host, so the example
 #        asserts membership instead of pinning positions.

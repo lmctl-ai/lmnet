@@ -1,6 +1,6 @@
 # Chapter: Basics - list network interfaces
 # Shows: net.interfaces, Iface.name/addr/mtu/up/loopback, IfaceList len/at
-# Run: lmscript examples/interfaces.lms      (then: lmnet --dsl build/interfaces.dslb)
+# Run: lmscript examples/interfaces.lms      (then: lmnet --lmcode build/interfaces.dslb)
 # Needs: nothing (offline); every POSIX host has at least the loopback iface.
 # exit: 0
 # expect:

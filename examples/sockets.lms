@@ -1,6 +1,6 @@
 # Chapter: Basics - socket tables
 # Shows: net.sockets, Socket.proto/local/remote/state/pid/process, filtering
-# Run: lmscript examples/sockets.lms      (then: lmnet --dsl build/sockets.dslb)
+# Run: lmscript examples/sockets.lms      (then: lmnet --lmcode build/sockets.dslb)
 # Needs: nothing (offline); every Linux host has listening sockets.
 # exit: 0
 # expect:

@@ -1,7 +1,7 @@
 # Chapter: Diagnostics - traceroute
 # Shows: net.trace, TraceResult dest_ip/error/hops, HopList len/at,
 #        Hop ttl/from/rtt_ms/reached
-# Run: lmscript examples/trace.lms      (then: lmnet --dsl build/trace.dslb)
+# Run: lmscript examples/trace.lms      (then: lmnet --lmcode build/trace.dslb)
 # Needs: CAP_NET_RAW (or root) to see real probes; without it net.trace
 #        reports the permission error and the script degrades gracefully.
 #        On loopback the first probe (ttl=1) already reaches the target.

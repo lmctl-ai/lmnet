@@ -2,7 +2,7 @@
 # Shows: net.links, Link.name/index/mtu/up/loopback/mac/txqlen,
 #        Link rx_bytes/rx_packets/rx_errors/rx_dropped + tx_*,
 #        LinkList len/at
-# Run: lmscript examples/link.lms      (then: lmnet --dsl build/link.dslb)
+# Run: lmscript examples/link.lms      (then: lmnet --lmcode build/link.dslb)
 # Needs: nothing (offline); rtnetlink dumps every link device directly.
 #        The loopback link always exists, so the "found" line is pinned.
 # exit: 0

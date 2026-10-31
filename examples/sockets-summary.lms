@@ -1,6 +1,6 @@
 # Chapter: Basics - socket summary
 # Shows: net.socket_summary, SocketSummary.total/listening/tcp*/udp*/unix/state_count
-# Run: lmscript examples/sockets-summary.lms      (then: lmnet --dsl build/sockets-summary.dslb)
+# Run: lmscript examples/sockets-summary.lms      (then: lmnet --lmcode build/sockets-summary.dslb)
 # Needs: nothing (offline); counts vary by host, so only the framing lines are pinned.
 # exit: 0
 # expect:
