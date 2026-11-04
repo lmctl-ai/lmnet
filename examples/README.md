@@ -4,8 +4,7 @@ Runnable lmscript programs, one per scenario. Each compiles to bytecode and
 runs against the `lmnet` host:
 
 ```sh
-lmscript examples/dns-lookup.lms build/dns-lookup.dslb
-lmnet --lmcode build/dns-lookup.dslb
+lmscript examples/dns-lookup.lms
 ```
 
 The `install="github:lmctl-ai/lmnet@latest"` line in each script pins the

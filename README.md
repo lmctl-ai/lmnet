@@ -165,15 +165,16 @@ the message.
 ## Scripting
 
 ```lmscript
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 let addrs = net.dns_lookup("example.com");
 println(str(addrs.len()) + " addresses");
 let ifs = net.interfaces();
 for (i in range(0, ifs.len())) {
   println(ifs.at(i).name() + " " + ifs.at(i).addr());
 }
-end _dsl_
-savedsl(p, "build/show.dslb");
+end _lmcode_
+r = run_lmcode(p);
+require(r.ok, json_stringify(r));
 ```
 
 The lmcode std catalog is available in every script (`str_*`, `math_*`,
@@ -229,4 +230,9 @@ the compiled executable is
 a combined work whose distribution is governed by those upstream licenses.
 Made by **Lattice Systems LLC**.
 
-Compiler minimum: lmscript 0.2.420. The embedded schema contains only host declarations; string, math, collection and file std functions are implicit.
+Compiler minimum: lmscript 0.2.460. The embedded schema contains only host declarations; string, math, collection and file std functions are implicit.
+
+`run_lmcode` returns the invocation result map; check `r.ok`. Host stdout carries
+one terminal SDK frame. Block-level `println` writes diagnostics to stderr.
+`--dry-run --lmcode FILE...` and dry invocation metadata validate all inputs
+without executing networking or file calls. Native subcommand output is unchanged.

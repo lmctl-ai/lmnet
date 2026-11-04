@@ -37,6 +37,13 @@ python3 tests/check-host-flags.py schema/lmnet.dsl.json "$HOST" || fail "hard ho
 LOCAL_HOST_DIR="$(cd "$BUILD_DIR" && pwd)"
 PATH="$LOCAL_HOST_DIR:$PATH"
 export PATH
+export LMSCRIPT_BIN="$LMSCRIPT"
+export LMNET_HOST="$LOCAL_HOST_DIR/lmnet"
+export LMNET_SHIM="$LOCAL_HOST_DIR/invocation_shim"
+run_prog() { python3 tests/invocation.py "$@"; }
+capture_prog() { run_prog --capture-only --capture "$WORK/$1.capture" "$WORK/$1.lms" >/dev/null; }
+printf 's = load_schema(cli="lmnet");\n' >"$WORK/discover.lms"
+"$LMSCRIPT" "$WORK/discover.lms" >/dev/null || fail "host schema discovery"
 
 want_version="lmnet $(sed -n 's/^project(lmnet VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"
 [ "$("$HOST" --version)" = "$want_version" ] || fail "--version prints $want_version"
@@ -126,7 +133,7 @@ PY
 ok "dig: JSON rcode NOERROR with canned A answer 93.184.216.34"
 
 cat > "$WORK/dig.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 let r = net.dns_query("example.com", "A", "127.0.0.1:15353");
 println("rcode: " + r.rcode());
 let answers = r.answers();
@@ -134,11 +141,10 @@ if (answers.len() > 0) {
   println("data: " + answers.at(0).data());
   println("ttl: " + str(answers.at(0).ttl()));
 }
-end _dsl_
-savedsl(p, "$WORK/dig.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/dig.lms" "$WORK/dig.dslb" >/dev/null || fail "dig bytecode compile"
-out="$("$HOST" --lmcode "$WORK/dig.dslb")"
+capture_prog dig >/dev/null || fail "dig bytecode compile"
+out="$("$HOST" --lmcode "$WORK/dig.capture/0.lmcode" 2>&1)"
 grep -q '^rcode: NOERROR$' <<<"$out" || fail "dig bytecode rcode: $out"
 grep -q '^data: 93\.184\.216\.34$' <<<"$out" || fail "dig bytecode data: $out"
 grep -q '^ttl: 300$' <<<"$out" || fail "dig bytecode ttl: $out"
@@ -160,13 +166,12 @@ PY
 ok "dig NXDOMAIN rcode surfaces in JSON"
 
 cat > "$WORK/dnsoob.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 net.dns_query("example.com", "A", "127.0.0.1:15353").answers().at(5);
-end _dsl_
-savedsl(p, "$WORK/dnsoob.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/dnsoob.lms" "$WORK/dnsoob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --lmcode "$WORK/dnsoob.dslb" 2>&1)"; code=$?; set -e
+capture_prog dnsoob >/dev/null || fail "compile"
+set +e; out="$("$HOST" --lmcode "$WORK/dnsoob.capture/0.lmcode" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "DnsAnswerList.at bounds (exit $code): $out"
 ok "DnsAnswerList.at out of range refused (exit 3)"
 
@@ -264,7 +269,7 @@ ok "sockets with unknown filter refused (exit 2)"
 cat >> "$WORK/smoke.lms" <<'EOF2'
 EOF2
 cat > "$WORK/socks.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 let socks = net.sockets("tcp", true);
 let listeners = 0;
 for (i in range(0, socks.len())) {
@@ -273,11 +278,10 @@ for (i in range(0, socks.len())) {
 }
 println("tcp listeners: " + str(listeners));
 if (listeners < 1) { println("no listeners found"); }
-end _dsl_
-savedsl(p, "$WORK/socks.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/socks.lms" "$WORK/socks.dslb" >/dev/null || fail "socks compile"
-out="$("$HOST" --lmcode "$WORK/socks.dslb")"
+capture_prog socks >/dev/null || fail "socks compile"
+out="$("$HOST" --lmcode "$WORK/socks.capture/0.lmcode" 2>&1)"
 grep -q '^tcp listeners: [1-9]' <<<"$out" || fail "sockets bytecode: $out"
 ok "bytecode: net.sockets through the DSL"
 
@@ -329,14 +333,13 @@ PY
 ok "sockets tcp --summary: proto filter honored"
 
 cat > "$WORK/socksum.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 let s = net.socket_summary("");
 println("summary: total=" + str(s.total()) + " listen=" + str(s.listening()));
-end _dsl_
-savedsl(p, "$WORK/socksum.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/socksum.lms" "$WORK/socksum.dslb" >/dev/null || fail "socksum compile"
-out="$("$HOST" --lmcode "$WORK/socksum.dslb")"
+capture_prog socksum >/dev/null || fail "socksum compile"
+out="$("$HOST" --lmcode "$WORK/socksum.capture/0.lmcode" 2>&1)"
 SOCKSUM_OUT="$out" python3 - <<'PY'
 import os, re
 line = next((l for l in os.environ["SOCKSUM_OUT"].splitlines()
@@ -429,17 +432,16 @@ set -e
 ok "scan rejects bad port specs (exit 2)"
 
 cat > "$WORK/sockscan.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 println("check open: " + str(net.check("127.0.0.1", 15355)));
 println("check closed: " + str(net.check("127.0.0.1", 15356)));
 let r = net.scan("127.0.0.1", "15355");
 println("scan open=" + str(r.open()));
 println("scan resolved=" + r.resolved());
-end _dsl_
-savedsl(p, "$WORK/sockscan.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/sockscan.lms" "$WORK/sockscan.dslb" >/dev/null || fail "sockscan compile"
-out="$("$HOST" --lmcode "$WORK/sockscan.dslb")"
+capture_prog sockscan >/dev/null || fail "sockscan compile"
+out="$("$HOST" --lmcode "$WORK/sockscan.capture/0.lmcode" 2>&1)"
 grep -q '^check open: true$' <<<"$out" || fail "net.check open port: $out"
 grep -q '^check closed: false$' <<<"$out" || fail "net.check closed port: $out"
 grep -q '^scan open=1$' <<<"$out" || fail "net.scan open count: $out"
@@ -567,7 +569,7 @@ conn.close()
 PY
 PIPE_DSL_CLIENT_PID=$!
 cat > "$WORK/tcpsock.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 let c = net.tcp_connect("127.0.0.1", 15359);
 c.send("ping");
 let r = c.recv(64);
@@ -579,11 +581,10 @@ let m = lc.recv(64);
 println("got: " + m);
 lc.send("ack");
 lc.close();
-end _dsl_
-savedsl(p, "$WORK/tcpsock.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/tcpsock.lms" "$WORK/tcpsock.dslb" >/dev/null || fail "tcpsock compile"
-out="$("$HOST" --lmcode "$WORK/tcpsock.dslb")"
+capture_prog tcpsock >/dev/null || fail "tcpsock compile"
+out="$("$HOST" --lmcode "$WORK/tcpsock.capture/0.lmcode" 2>&1)"
 grep -q '^echo: ping$' <<<"$out" || fail "net.tcp_connect roundtrip: $out"
 grep -q '^got: dsl-listener$' <<<"$out" || fail "TcpListener.accept roundtrip: $out"
 wait "$PIPE_DSL_CLIENT_PID" || fail "DSL listener client failed"
@@ -607,28 +608,26 @@ PY
 ok "route: JSON dump with dest/proto on every route, sane default routes"
 
 cat > "$WORK/routes.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 let routes = net.routes();
 println("routes: " + str(routes.len()));
 let r = routes.at(0);
 println("first: " + r.dest() + " proto=" + r.proto() + " table=" + r.table());
-end _dsl_
-savedsl(p, "$WORK/routes.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/routes.lms" "$WORK/routes.dslb" >/dev/null || fail "routes compile"
-out="$("$HOST" --lmcode "$WORK/routes.dslb")"
+capture_prog routes >/dev/null || fail "routes compile"
+out="$("$HOST" --lmcode "$WORK/routes.capture/0.lmcode" 2>&1)"
 grep -q '^routes: [1-9]' <<<"$out" || fail "routes bytecode count: $out"
 grep -q '^first: .*proto=' <<<"$out" || fail "routes bytecode first route: $out"
 ok "bytecode: net.routes through the DSL"
 
 cat > "$WORK/routeoob.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 net.routes().at(9999);
-end _dsl_
-savedsl(p, "$WORK/routeoob.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/routeoob.lms" "$WORK/routeoob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --lmcode "$WORK/routeoob.dslb" 2>&1)"; code=$?; set -e
+capture_prog routeoob >/dev/null || fail "compile"
+set +e; out="$("$HOST" --lmcode "$WORK/routeoob.capture/0.lmcode" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "RouteList.at bounds (exit $code): $out"
 ok "RouteList.at out of range refused (exit 3)"
 
@@ -648,29 +647,27 @@ PY
 ok "neigh: JSON dump, ip/dev/state/family on every entry"
 
 cat > "$WORK/neigh.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 let neighs = net.neighbors();
 println("neighbors: " + str(neighs.len()));
 if (neighs.len() > 0) {
   let n = neighs.at(0);
   println("first: " + n.ip() + " dev " + n.dev() + " state " + n.state());
 }
-end _dsl_
-savedsl(p, "$WORK/neigh.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/neigh.lms" "$WORK/neigh.dslb" >/dev/null || fail "neigh compile"
-out="$("$HOST" --lmcode "$WORK/neigh.dslb")"
+capture_prog neigh >/dev/null || fail "neigh compile"
+out="$("$HOST" --lmcode "$WORK/neigh.capture/0.lmcode" 2>&1)"
 grep -Eq '^neighbors: [0-9]+$' <<<"$out" || fail "neigh bytecode count: $out"
 ok "bytecode: net.neighbors through the DSL"
 
 cat > "$WORK/neighoob.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 net.neighbors().at(9999);
-end _dsl_
-savedsl(p, "$WORK/neighoob.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/neighoob.lms" "$WORK/neighoob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --lmcode "$WORK/neighoob.dslb" 2>&1)"; code=$?; set -e
+capture_prog neighoob >/dev/null || fail "compile"
+set +e; out="$("$HOST" --lmcode "$WORK/neighoob.capture/0.lmcode" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "NeighborList.at bounds (exit $code): $out"
 ok "NeighborList.at out of range refused (exit 3)"
 
@@ -694,30 +691,28 @@ PY
 ok "link: JSON dump, lo up/loopback, non-negative counters everywhere"
 
 cat > "$WORK/links.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 let links = net.links();
 println("links: " + str(links.len()));
 for (i in range(0, links.len())) {
   let l = links.at(i);
   if (l.name() == "lo") { println("lo: up " + str(l.up()) + " mtu=" + str(l.mtu())); }
 }
-end _dsl_
-savedsl(p, "$WORK/links.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/links.lms" "$WORK/links.dslb" >/dev/null || fail "links compile"
-out="$("$HOST" --lmcode "$WORK/links.dslb")"
+capture_prog links >/dev/null || fail "links compile"
+out="$("$HOST" --lmcode "$WORK/links.capture/0.lmcode" 2>&1)"
 grep -q '^links: [1-9]' <<<"$out" || fail "links bytecode count: $out"
 grep -q '^lo: up true mtu=' <<<"$out" || fail "links bytecode lo line: $out"
 ok "bytecode: net.links through the DSL"
 
 cat > "$WORK/linkoob.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 net.links().at(9999);
-end _dsl_
-savedsl(p, "$WORK/linkoob.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/linkoob.lms" "$WORK/linkoob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --lmcode "$WORK/linkoob.dslb" 2>&1)"; code=$?; set -e
+capture_prog linkoob >/dev/null || fail "compile"
+set +e; out="$("$HOST" --lmcode "$WORK/linkoob.capture/0.lmcode" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "LinkList.at bounds (exit $code): $out"
 ok "LinkList.at out of range refused (exit 3)"
 
@@ -744,30 +739,28 @@ PY
 ok "counters: JSON object, >=50 keys, Ip/Tcp/Udp spot keys, names sane"
 
 cat > "$WORK/counters.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 let cs = net.counters();
 println("counters: " + str(cs.len()));
 for (i in range(0, cs.len())) {
   let c = cs.at(i);
   if (c.name() == "Ip.InReceives") { println("ip receives: " + str(c.value())); }
 }
-end _dsl_
-savedsl(p, "$WORK/counters.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/counters.lms" "$WORK/counters.dslb" >/dev/null || fail "counters compile"
-out="$("$HOST" --lmcode "$WORK/counters.dslb")"
+capture_prog counters >/dev/null || fail "counters compile"
+out="$("$HOST" --lmcode "$WORK/counters.capture/0.lmcode" 2>&1)"
 grep -q '^counters: [1-9][0-9]' <<<"$out" || fail "counters bytecode count: $out"
 grep -q '^ip receives: [0-9][0-9]*$' <<<"$out" || fail "counters bytecode ip receives: $out"
 ok "bytecode: net.counters through the DSL"
 
 cat > "$WORK/countersoob.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 net.counters().at(999999);
-end _dsl_
-savedsl(p, "$WORK/countersoob.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/countersoob.lms" "$WORK/countersoob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --lmcode "$WORK/countersoob.dslb" 2>&1)"; code=$?; set -e
+capture_prog countersoob >/dev/null || fail "compile"
+set +e; out="$("$HOST" --lmcode "$WORK/countersoob.capture/0.lmcode" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "CounterList.at bounds (exit $code): $out"
 ok "CounterList.at out of range refused (exit 3)"
 
@@ -792,7 +785,7 @@ PY
 ok "rule: JSON dump, pref-0 local lookup, sane action/table/from/fwmark"
 
 cat > "$WORK/rules.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 let rules = net.rules();
 println("rules: " + str(rules.len()));
 for (i in range(0, rules.len())) {
@@ -801,23 +794,21 @@ for (i in range(0, rules.len())) {
     if (r.table() == "local") { println("local rule found"); }
   }
 }
-end _dsl_
-savedsl(p, "$WORK/rules.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/rules.lms" "$WORK/rules.dslb" >/dev/null || fail "rules compile"
-out="$("$HOST" --lmcode "$WORK/rules.dslb")"
+capture_prog rules >/dev/null || fail "rules compile"
+out="$("$HOST" --lmcode "$WORK/rules.capture/0.lmcode" 2>&1)"
 grep -q '^rules: [1-9]' <<<"$out" || fail "rules bytecode count: $out"
 grep -q '^local rule found$' <<<"$out" || fail "rules bytecode local rule: $out"
 ok "bytecode: net.rules through the DSL"
 
 cat > "$WORK/ruleoob.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 net.rules().at(9999);
-end _dsl_
-savedsl(p, "$WORK/ruleoob.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/ruleoob.lms" "$WORK/ruleoob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --lmcode "$WORK/ruleoob.dslb" 2>&1)"; code=$?; set -e
+capture_prog ruleoob >/dev/null || fail "compile"
+set +e; out="$("$HOST" --lmcode "$WORK/ruleoob.capture/0.lmcode" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "RuleList.at bounds (exit $code): $out"
 ok "RuleList.at out of range refused (exit 3)"
 
@@ -852,7 +843,7 @@ ok "trace failure exits 1 naming the host"
 # Failed traces are data in the DSL (error() carries the message), so the same
 # bytecode runs cleanly with and without raw-socket permission.
 cat > "$WORK/trace.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 let r = net.trace("127.0.0.1", 8);
 if (r.error() != "") {
   println("trace unavailable: " + r.error());
@@ -861,11 +852,10 @@ if (r.error() != "") {
   println("hops: " + str(r.hops().len()));
   println("reached: " + str(r.hops().at(0).reached()));
 }
-end _dsl_
-savedsl(p, "$WORK/trace.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/trace.lms" "$WORK/trace.dslb" >/dev/null || fail "trace compile"
-out="$("$HOST" --lmcode "$WORK/trace.dslb")"
+capture_prog trace >/dev/null || fail "trace compile"
+out="$("$HOST" --lmcode "$WORK/trace.capture/0.lmcode" 2>&1)"
 if [ "$TRACE_RAW" = 1 ]; then
   grep -q '^dest: 127\.0\.0\.1$' <<<"$out" || fail "trace bytecode dest: $out"
   grep -q '^hops: 1$' <<<"$out" || fail "trace bytecode hops: $out"
@@ -879,19 +869,18 @@ fi
 # Bounds refusal needs no socket: a permission failure yields an empty hop
 # list, so at(999) is still out of range everywhere.
 cat > "$WORK/traceoob.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 net.trace("127.0.0.1", 8).hops().at(999);
-end _dsl_
-savedsl(p, "$WORK/traceoob.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/traceoob.lms" "$WORK/traceoob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --lmcode "$WORK/traceoob.dslb" 2>&1)"; code=$?; set -e
+capture_prog traceoob >/dev/null || fail "compile"
+set +e; out="$("$HOST" --lmcode "$WORK/traceoob.capture/0.lmcode" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "HopList.at bounds (exit $code): $out"
 ok "HopList.at out of range refused (exit 3)"
 
 # --- DSL bytecode ---
 cat > "$WORK/smoke.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 let addrs = net.dns_lookup("localhost");
 if (addrs.len() < 1) { println("no addresses"); }
 println("localhost -> " + str(addrs.len()) + " addresses");
@@ -903,45 +892,49 @@ for (i in range(0, ifs.len())) {
   if (f.loopback()) { names.add("lo-present"); }
 }
 if (names.len() != 1) { println("missing loopback"); }
-end _dsl_
-savedsl(p, "$WORK/smoke.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/smoke.lms" "$WORK/smoke.dslb" >/dev/null || fail "smoke compile"
-[ "$(od -An -t u1 -j 5 -N 1 "$WORK/smoke.dslb" | tr -d ' ')" = 6 ] || fail "smoke was not compiled as bytecode v6"
-out="$("$HOST" --lmcode "$WORK/smoke.dslb")"
-[ "$(tail -1 <<<"$out")" = '{"ok": true, "result": null}' ] || fail "smoke run: $out"
+capture_prog smoke >/dev/null || fail "smoke compile"
+[ "$(od -An -t u1 -j 5 -N 1 "$WORK/smoke.capture/0.lmcode" | tr -d ' ')" = 6 ] || fail "smoke was not compiled as bytecode v6"
+out="$("$HOST" --lmcode "$WORK/smoke.capture/0.lmcode" 2>&1)"
+grep -qx '{"ok":true,"result":null}' <<<"$out" || fail "smoke run: $out"
 grep -q '^localhost -> [1-9]' <<<"$out" || fail "smoke dns line: $out"
 grep -q 'lo 127\.0\.0\.1/8 mtu=' <<<"$out" || grep -q 'lo ::1/128 mtu=' <<<"$out" || fail "smoke interfaces line: $out"
 ok "bytecode: dns_lookup + interfaces through the DSL"
 
 cat > "$WORK/oob.lms" <<EOF
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 net.interfaces().at(99);
-end _dsl_
-savedsl(p, "$WORK/oob.dslb");
+end _lmcode_
 EOF
-"$LMSCRIPT" "$WORK/oob.lms" "$WORK/oob.dslb" >/dev/null || fail "compile"
-set +e; out="$("$HOST" --lmcode "$WORK/oob.dslb" 2>&1)"; code=$?; set -e
+capture_prog oob >/dev/null || fail "compile"
+set +e; out="$("$HOST" --lmcode "$WORK/oob.capture/0.lmcode" 2>&1)"; code=$?; set -e
 [ "$code" = 3 ] && [[ "$out" == *'out of range'* ]] || fail "IfaceList.at bounds (exit $code): $out"
 ok "IfaceList.at out of range refused (exit 3)"
 
 set +e; out="$("$HOST" 2>&1)"; code=$?; set -e
 [ "$code" = 2 ] && [[ "$out" == *'usage: lmnet'* ]] || fail "bad args refusal (exit $code): $out"
 ok "bad arguments refused (exit 2)"
-set +e; out="$("$HOST" --lmcode "$WORK/no-such.dslb" 2>&1)"; code=$?; set -e
-[ "$code" = 3 ] && [[ "$out" == *'"phase": "load"'* ]] || fail "missing bytecode refusal (exit $code): $out"
+set +e; out="$("$HOST" --lmcode "$WORK/no-such.capture/0.lmcode" 2>&1)"; code=$?; set -e
+[ "$code" = 3 ] && [[ "$out" == *'"phase":"load"'* ]] || fail "missing bytecode refusal (exit $code): $out"
 ok "missing bytecode file refused at load (exit 3)"
 
-"$HOST" --lmcode "$WORK/smoke.dslb" "$WORK/smoke.dslb" >"$WORK/multi.jsonl" || fail "multi-bytecode run"
-[ "$(grep -c '^{"ok"' "$WORK/multi.jsonl" | tr -d ' ')" = 2 ] || fail "multiple bytecode files did not run in order"
-ok "multiple bytecode files run sequentially"
+"$HOST" --lmcode "$WORK/smoke.capture/0.lmcode" "$WORK/smoke.capture/0.lmcode" >"$WORK/multi.jsonl" || fail "multi-bytecode run"
+[ "$(grep -c '^{"ok"' "$WORK/multi.jsonl" | tr -d ' ')" = 1 ] || fail "multiple bytecode files did not run in order"
+python3 - "$WORK/multi.jsonl" <<'PYMULTI'
+import json,sys
+lines=open(sys.argv[1]).read().splitlines()
+assert len(lines)==3 and lines[0]=='LMCODE_RETURN_BEGIN' and lines[2]=='LMCODE_RETURN_END'
+assert json.loads(lines[1])=={'ok':True,'result':[None,None],'parts':2}
+PYMULTI
+ok "multiple bytecode files run sequentially in one frame"
 
 # --- examples compile and run ---
 mkdir -p build
 for f in counters dns-lookup dns-query interfaces link neigh pipe routes rule scan sockets sockets-summary trace; do
   [ -f "examples/$f.lms" ] || continue
-  "$LMSCRIPT" "examples/$f.lms" "build/$f.dslb" >"$WORK/$f.compile.log" 2>&1 || fail "$f example compile"
-  "$HOST" --lmcode "build/$f.dslb" >"$WORK/$f.out" || fail "$f example run"
+  run_prog --capture-only --capture "$WORK/example-$f.capture" "examples/$f.lms" >"$WORK/$f.compile.log" 2>&1 || fail "$f example compile"
+  "$HOST" --lmcode "$WORK/example-$f.capture/0.lmcode" >"$WORK/$f.frame" 2>"$WORK/$f.out" || fail "$f example run"
   while IFS= read -r line; do
     grep -qxF "${line:2}" "$WORK/$f.out" || fail "$f example output missing: ${line:2} (got $(cat "$WORK/$f.out"))"
   done < <(grep '^#|' "examples/$f.lms")
@@ -962,11 +955,12 @@ w=pathlib.Path(sys.argv[1])
 read=lambda name:set((w/name).read_text().splitlines())
 assert read('std-registry.sig')-read('std-builtins.sig') == read('std-host-only.sig'), 'host-only registry drift'
 schema=str(pathlib.Path('schema/lmnet.dsl.json').resolve()).replace('\\','/')
-out=str(w/'std-probe.dslb').replace('\\','/')
-(w/'std-probe.lms').write_text('p = _lmcode_ schema='+json.dumps(schema)+';\nlet values = str_list().add("abc");\nif (str_len(values.at(0)) != 3) { let bad = int_list().at(0); }\nend _lmcode_\nsavedsl(p, '+json.dumps(out)+');\n')
+(w/'std-probe.lms').write_text('p = _lmcode_ schema='+json.dumps(schema)+';\nlet values = str_list().add("abc");\nif (str_len(values.at(0)) != 3) { let bad = int_list().at(0); }\nend _lmcode_\n')
 PYSTD
-"$LMSCRIPT" "$WORK/std-probe.lms" > "$WORK/std-probe.log" 2>&1 || { cat "$WORK/std-probe.log"; fail "implicit std compile"; }
-"$HOST" --lmcode "$WORK/std-probe.dslb" > "$WORK/std-run.log" 2>&1 || { cat "$WORK/std-run.log"; fail "implicit std runtime"; }
+capture_prog std-probe > "$WORK/std-probe.log" 2>&1 || { cat "$WORK/std-probe.log"; fail "implicit std compile"; }
+"$HOST" --lmcode "$WORK/std-probe.capture/0.lmcode" > "$WORK/std-run.log" 2>&1 || { cat "$WORK/std-run.log"; fail "implicit std runtime"; }
 ok "host-only signatures and implicit std runtime"
 
+python3 tests/protocol.py "$WORK" || fail "invocation protocol"
+ok "framing, builders, load-before-effects, dry metadata and passive introspection"
 echo "PASS: $pass checks"

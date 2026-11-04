@@ -1,6 +1,6 @@
 # Chapter: Basics - kernel networking counters (netstat -s/nstat-lite)
 # Shows: net.counters, Counter.name/value, CounterList len/at
-# Run: lmscript examples/counters.lms   (then: lmnet --lmcode build/counters.dslb)
+# Run: lmscript examples/counters.lms
 # Needs: nothing (offline); reads /proc/net/{snmp,netstat,snmp6}. A missing
 #        source degrades silently; only an unreadable /proc fails the run.
 #        The count line is NOT pinned (kernel-dependent).
@@ -8,7 +8,7 @@
 # expect:
 #|kernel counters
 #|counter dump complete
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 
 println("kernel counters");
 let cs = net.counters();
@@ -21,5 +21,6 @@ for (i in range(0, cs.len())) {
 }
 println("counter dump complete");
 
-end _dsl_
-savedsl(p, "build/counters.dslb");
+end _lmcode_
+r = run_lmcode(p);
+require(r.ok, json_stringify(r));

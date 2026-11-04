@@ -1,7 +1,7 @@
 # Chapter: Diagnostics - traceroute
 # Shows: net.trace, TraceResult dest_ip/error/hops, HopList len/at,
 #        Hop ttl/from/rtt_ms/reached
-# Run: lmscript examples/trace.lms      (then: lmnet --lmcode build/trace.dslb)
+# Run: lmscript examples/trace.lms
 # Needs: CAP_NET_RAW (or root) to see real probes; without it net.trace
 #        reports the permission error and the script degrades gracefully.
 #        On loopback the first probe (ttl=1) already reaches the target.
@@ -9,7 +9,7 @@
 # expect:
 #|tracing 127.0.0.1
 #|done
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 
 println("tracing 127.0.0.1");
 let r = net.trace("127.0.0.1", 8);
@@ -30,5 +30,6 @@ if (r.error() != "") {
 }
 println("done");
 
-end _dsl_
-savedsl(p, "build/trace.dslb");
+end _lmcode_
+r = run_lmcode(p);
+require(r.ok, json_stringify(r));

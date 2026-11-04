@@ -1,6 +1,6 @@
 # Chapter: Basics - DNS query (dig-lite)
 # Shows: net.dns_query, DnsResult.rcode/error/answers, DnsAnswer fields
-# Run: lmscript examples/dns-query.lms      (then: lmnet --lmcode build/dns-query.dslb)
+# Run: lmscript examples/dns-query.lms
 # Needs: nothing (offline); queries 127.0.0.1:9 where nothing listens, so the
 #        query fails fast and cleanly. The failure text itself is OS-dependent
 #        ("connection refused" vs "timeout"), so only the stable shape of the
@@ -9,7 +9,7 @@
 # expect:
 #|querying example.com A @ 127.0.0.1:9 (nothing listens there)
 #|query failed cleanly
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 
 println("querying example.com A @ 127.0.0.1:9 (nothing listens there)");
 let r = net.dns_query("example.com", "A", "127.0.0.1:9");
@@ -25,5 +25,6 @@ if (r.error() != "") {
   }
 }
 
-end _dsl_
-savedsl(p, "build/dns-query.dslb");
+end _lmcode_
+r = run_lmcode(p);
+require(r.ok, json_stringify(r));

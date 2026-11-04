@@ -53,7 +53,7 @@ jobs:
         if: runner.os == 'Linux' && env.ONLY_OK == 'true'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
 
-      - name: lmscript compiler (npm @lmctl-ai/lmctl, DSL v5)
+      - name: lmscript compiler (npm @lmctl-ai/lmctl, lmcode v6)
         if: env.ONLY_OK == 'true'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -63,9 +63,9 @@ jobs:
         if: env.ONLY_OK == 'true'
         shell: bash
         run: |
-          npm i -g @lmctl-ai/lmctl@0.2.420
+          npm i -g @lmctl-ai/lmctl@0.2.460
           scripts/select-compiler.sh | tee compiler.txt
-          grep -q lmscript compiler.txt || { echo "no v5 compiler available"; exit 1; }
+          grep -q lmscript compiler.txt || { echo "no compatible lmcode compiler available"; exit 1; }
 
       - name: build and test
         if: env.ONLY_OK == 'true'

@@ -1,6 +1,6 @@
 # Chapter: Basics - DNS lookup
 # Shows: net.dns_lookup, std StrList len/at/contains, loopback resolution
-# Run: lmscript examples/dns-lookup.lms      (then: lmnet --lmcode build/dns-lookup.dslb)
+# Run: lmscript examples/dns-lookup.lms
 # Needs: nothing special; localhost resolves via the hosts database offline.
 #        Address order and IPv6 availability vary per host, so the example
 #        asserts membership instead of pinning positions.
@@ -9,7 +9,7 @@
 #|resolving localhost
 #|  127.0.0.1 present
 #|  all addresses numeric
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 
 println("resolving localhost");
 let addrs = net.dns_lookup("localhost");
@@ -33,5 +33,6 @@ if (numeric) {
   println("  non-numeric address leaked");
 }
 
-end _dsl_
-savedsl(p, "build/dns-lookup.dslb");
+end _lmcode_
+r = run_lmcode(p);
+require(r.ok, json_stringify(r));

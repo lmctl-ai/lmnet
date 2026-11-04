@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <optional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -299,7 +300,7 @@ void register_host(dslvm::Registry &reg, Host &host) {
   reg.context("net", "Net");
 
   reg.function("println", {"string"}, "void", [](Args &args) {
-    std::cout << args[0].s << "\n";
+    std::cerr << args[0].s << "\n";
     return Value::none();
   });
   reg.method("Net", "dns_lookup", {"string"}, "StrList", [&reg](void *, Args &args) {
@@ -914,7 +915,7 @@ int main(int argc, char **argv) {
       "       lmnet scan HOST [--ports SPEC] [--timeout MS] [--concurrency N]  # TCP connect port scanner as JSON (nmap-lite)\n"
       "       lmnet pipe HOST PORT | --listen PORT [--forever]  # TCP stdio bridge (nc-lite)\n"
       "       lmnet iperf3 [iperf3 options]   # the real iperf3 engine (client/server)\n"
-      "       lmnet --lmcode FILE [FILE ...]\n";
+      "       lmnet [--dry-run] --lmcode FILE [FILE ...]\n";
   if (argc == 2 && std::string(argv[1]) == "--version") {
     std::cout << "lmnet " LMNET_VERSION "\n";
     return std::cout ? 0 : 4;
@@ -1256,34 +1257,54 @@ int main(int argc, char **argv) {
     }
     return 0;
   }
-  if (argc >= 3 && std::string(argv[1]) == "--lmcode") {
-    for (int i = 2; i < argc; ++i) {
-      if (std::string(argv[i]).empty() || std::string(argv[i]).rfind("--", 0) == 0) {
-        std::cerr << usage;
-        return 2;
-      }
+  if (argc >= 2 && (std::string(argv[1]) == "--lmcode" || std::string(argv[1]) == "--dry-run")) {
+    bool dry = std::string(argv[1]) == "--dry-run";
+    int selector = dry ? 2 : 1;
+    auto usage_error = [&]() {
+      std::cerr << usage;
+      return dslvm::failure_frame("cli", dslvm::Error("CLI_USAGE", "invalid lmcode execution arguments"));
+    };
+    if (argc <= selector || std::string(argv[selector]) != "--lmcode") return usage_error();
+    std::vector<std::string> files;
+    for (int i = selector + 1; i < argc; ++i) {
+      std::string arg = argv[i];
+      if (arg == "--dry-run" && !dry) { dry = true; continue; }
+      if (arg.empty() || arg.rfind("--", 0) == 0) return usage_error();
+      files.push_back(arg);
     }
-    const std::string schema(reinterpret_cast<const char *>(lmnet::embedded_schema),
-                             lmnet::embedded_schema_size);
+    if (files.empty()) return usage_error();
+    std::optional<dslvm::InvocationResults> holder;
+    try {
+      if (dry && !std::getenv("LMCODE_INVOCATION_FILE")) holder.emplace(dslvm::InvocationResults::from_command(files, true));
+      else holder.emplace(dslvm::InvocationResults::from_command(files));
+    } catch (const dslvm::Error &e) { return dslvm::failure_frame("cli", e); }
+    auto &results = *holder;
+    if (dry && !results.dry()) return dslvm::failure_frame("cli", dslvm::Error("CLI_USAGE", "--dry-run contradicts real-mode metadata"));
+    const std::string schema(reinterpret_cast<const char *>(lmnet::embedded_schema), lmnet::embedded_schema_size);
     dslvm::Context context;
     context.set("net", &host);
-    std::vector<dslvm::Program> programs;
-    for (int i = 2; i < argc; ++i) {
-      try {
-        programs.push_back(dslvm::Program::load(dslvm::read_file(argv[i]), schema, reg));
-      } catch (const dslvm::Error &error) {
-        return dslvm::report_error("load", error);
-      }
+    dslvm::ResultContract contract;
+    try { contract = dslvm::ResultContract::from_schema(schema); }
+    catch (const dslvm::Error &e) { results.fail(std::nullopt, "load", e); return results.write_frame(std::cout); }
+    std::vector<std::pair<size_t, dslvm::Program>> programs;
+    // Validate every part before any networking or file effects.
+    for (const auto &part : results.registrations()) {
+      try { programs.emplace_back(part.index, dslvm::Program::load(dslvm::read_file(part.file), schema, reg)); }
+      catch (const dslvm::Error &e) { results.fail(part.index, "load", e); return results.write_frame(std::cout); }
+      catch (const std::exception &e) { results.fail(part.index, "load", dslvm::Error(e.what())); return results.write_frame(std::cout); }
     }
-    for (const auto &program : programs) {
+    for (auto &[index, program] : programs) {
       try {
-        program.run(context, reg);
-      } catch (const dslvm::Error &error) {
-        return dslvm::report_error("run", error);
-      }
-      dslvm::report_ok();
+        results.select(index, reg, contract);
+        // Dry invocations load but never execute: host calls can open sockets, send
+        // probes, read kernel state, accept connections, and write files.
+        if (!results.dry()) program.run(context, reg);
+        results.complete(index);
+      } catch (const dslvm::Error &e) {
+        results.fail(index, e.code == "APP_FAIL" ? "app" : "run", e); break;
+      } catch (const std::exception &e) { results.fail(index, "run", dslvm::Error(e.what())); break; }
     }
-    return 0;
+    return results.write_frame(std::cout);
   }
   std::cerr << usage;
   return 2;

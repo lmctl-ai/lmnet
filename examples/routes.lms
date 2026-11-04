@@ -1,14 +1,14 @@
 # Chapter: Basics - routing tables
 # Shows: net.routes, Route.dest/via/dev/proto/scope/metric/table/prefsrc,
 #        RouteList len/at, scanning for a default route
-# Run: lmscript examples/routes.lms      (then: lmnet --lmcode build/routes.dslb)
+# Run: lmscript examples/routes.lms
 # Needs: nothing (offline); rtnetlink dumps the kernel tables directly. Route
 #        contents vary per host, so only the constant lines are asserted.
 # exit: 0
 # expect:
 #|routes:
 #|route dump complete
-p = _dsl_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
 
 println("routes:");
 let routes = net.routes();
@@ -30,5 +30,6 @@ if (have_default) {
 }
 println("route dump complete");
 
-end _dsl_
-savedsl(p, "build/routes.dslb");
+end _lmcode_
+r = run_lmcode(p);
+require(r.ok, json_stringify(r));
