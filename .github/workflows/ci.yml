@@ -63,7 +63,7 @@ jobs:
         if: env.ONLY_OK == 'true'
         shell: bash
         run: |
-          npm i -g @lmctl-ai/lmctl@0.2.460
+          npm i -g @lmctl-ai/lmctl@0.2.482
           scripts/select-compiler.sh | tee compiler.txt
           grep -q lmscript compiler.txt || { echo "no compatible lmcode compiler available"; exit 1; }
 

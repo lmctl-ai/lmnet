@@ -953,6 +953,7 @@ python3 - "$WORK" <<'PYSTD'
 import pathlib,sys,json
 w=pathlib.Path(sys.argv[1])
 read=lambda name:set((w/name).read_text().splitlines())
+assert len(read('std-builtins.sig')) == 226, len(read('std-builtins.sig'))
 assert read('std-registry.sig')-read('std-builtins.sig') == read('std-host-only.sig'), 'host-only registry drift'
 schema=str(pathlib.Path('schema/lmnet.dsl.json').resolve()).replace('\\','/')
 (w/'std-probe.lms').write_text('p = _lmcode_ schema='+json.dumps(schema)+';\nlet values = str_list().add("abc");\nif (str_len(values.at(0)) != 3) { let bad = int_list().at(0); }\nend _lmcode_\n')
@@ -963,4 +964,44 @@ ok "host-only signatures and implicit std runtime"
 
 python3 tests/protocol.py "$WORK" || fail "invocation protocol"
 ok "framing, builders, load-before-effects, dry metadata and passive introspection"
+
+# --- lmcode std REST endpoints and stateless CLI (RestGet, CliCommand, CliOption, rest_cli) ---
+cat > "$WORK/std-rest-cli.lms" <<'EOF'
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+@"--dev"
+fn opt_dev(x: RestExchange) -> void implements CliOption {
+  x.set("dev", x.query("dev"));
+}
+
+@"link-state"
+fn cmd_link_state(x: RestExchange) -> void implements CliCommand {
+  let target = x.get("dev");
+  let links = net.links();
+  let state = "missing";
+  for (i in range(0, links.len())) {
+    let l = links.at(i);
+    if (l.name() == target) {
+      state = l.name() + ":" + str(l.loopback()) + ":" + str(l.up());
+    }
+  }
+  x.send(state + ":" + x.body());
+}
+
+@"/dns/localhost"
+fn get_dns_localhost(x: RestExchange) -> void implements RestGet {
+  let addrs = net.dns_lookup("localhost");
+  x.json("{\"resolved\":" + str(addrs.len() > 0) + "}");
+}
+
+rest_config("session", "global");
+$return.cli_out = rest_cli(str_split("--dev=lo link-state -- probe", " "));
+$return.get_out = rest_cli(str_split("/dns/localhost", " "));
+end _lmcode_
+EOF
+capture_prog std-rest-cli > "$WORK/std-rest-cli.log" 2>&1 || { cat "$WORK/std-rest-cli.log"; fail "std-rest-cli compile"; }
+out="$("$HOST" --lmcode "$WORK/std-rest-cli.capture/0.lmcode")" || fail "std-rest-cli run"
+echo "$out" | grep -qF '"cli_out":"lo:true:true:probe"' || fail "std-rest-cli cli_out: $out"
+echo "$out" | grep -qF '"get_out":"{\"resolved\":true}"' || fail "std-rest-cli get_out: $out"
+ok "lmcode std REST endpoints and stateless CLI (RestGet, CliCommand, CliOption, rest_cli)"
+
 echo "PASS: $pass checks"

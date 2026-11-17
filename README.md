@@ -177,9 +177,46 @@ r = run_lmcode(p);
 require(r.ok, json_stringify(r));
 ```
 
-The lmcode std catalog is available in every script (`str_*`, `math_*`,
-`file_*`, `str_list`/`str_map`, ...) without declaring it in the host schema.
+The lmcode std catalog (`lmcode_std_v3`, 226 signatures) is available in every script (`str_*`, `math_*`,
+`file_*`, `str_list`/`str_map`, REST endpoints, and stateless CLI interfaces) without declaring it in the host schema.
 See `examples/` for runnable scripts.
+
+### Standard REST Endpoints and Stateless CLI in `lmcode`
+
+Because `lmnet` embeds the canonical `lmcode` standard library (`lmcode_std_v3`, 226 signatures), scripts can also define REST endpoints (`RestGet`, `RestPost`, `RestPut`, `RestDelete`, `RestPatch`, `RestHead`, `RestOptions`, `RestHandler`) and stateless CLI commands/options (`CliCommand`, `CliOption`) with `@"..."` path annotations and dispatch them via `rest_serve()`, `rest_route(...)`, `rest_config(...)`, or `rest_cli(args)`:
+
+```lms
+p = _lmcode_ cli="lmnet" install="github:lmctl-ai/lmnet@latest";
+  @"--dev"
+  fn opt_dev(x: RestExchange) -> void implements CliOption {
+    x.set("dev", x.query("dev"));
+  }
+
+  @"link-state"
+  fn cmd_link_state(x: RestExchange) -> void implements CliCommand {
+    let target = x.get("dev");
+    let links = net.links();
+    let state = "missing";
+    for (i in range(0, links.len())) {
+      let l = links.at(i);
+      if (l.name() == target) {
+        state = l.name() + ":" + str(l.loopback()) + ":" + str(l.up());
+      }
+    }
+    x.send(state + ":" + x.body());
+  }
+
+  @"/dns/localhost"
+  fn get_dns_localhost(x: RestExchange) -> void implements RestGet {
+    let addrs = net.dns_lookup("localhost");
+    x.json("{\"resolved\":" + str(addrs.len() > 0) + "}");
+  }
+
+  rest_config("session", "global");
+  $return.cli_out = rest_cli(str_split("--dev=lo link-state -- probe", " "));
+  $return.get_out = rest_cli(str_split("/dns/localhost", " "));
+end _lmcode_
+```
 
 ## Platform support
 
@@ -230,7 +267,7 @@ the compiled executable is
 a combined work whose distribution is governed by those upstream licenses.
 Made by **Lattice Systems LLC**.
 
-Compiler minimum: lmscript 0.2.460. The embedded schema contains only host declarations; string, math, collection and file std functions are implicit.
+Compiler minimum: lmscript 0.2.482. The embedded schema contains only host declarations; string, math, collection, file, and REST/CLI std functions and interfaces (`lmcode_std_v3`, 226 signatures) are implicit.
 
 `run_lmcode` returns the invocation result map; check `r.ok`. Host stdout carries
 one terminal SDK frame. Block-level `println` writes diagnostics to stderr.
