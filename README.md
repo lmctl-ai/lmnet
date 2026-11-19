@@ -5,6 +5,8 @@ statically-linked, dependency-free executable. Not a network monitor daemon —
 a debug and research CLI you can also drive from
 [lmscript](https://github.com/lmctl-ai).
 
+**Documentation:** [Quick reference](https://www.lmctl.com/tools/lmnet/) · [LLM skill](https://www.lmctl.com/tools/lmnet/skill.html) · [Guide](https://www.lmctl.com/tools/lmnet/guide.html) · [Reference](https://www.lmctl.com/tools/lmnet/reference.html)
+
 The long-term goal is to combine the common Linux network toolbox (`ping`,
 `ip`, `netstat`, `lsof`, `traceroute`, `mtr`, `tracepath`, `dig`,
 `nslookup`, `iftop`, `iperf3`, `nmap`) behind one CLI and one scripting surface.
